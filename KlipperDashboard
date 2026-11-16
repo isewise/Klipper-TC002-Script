@@ -1094,23 +1094,29 @@ class KlipperDashboard
     if !isinstance(result, map) return end
     var entries = result.find("gcode_store")
     if !isinstance(entries, list) return end
+    # Berry reals are 32-bit here: an epoch time like 1794850052.7 rounds to
+    # a 128 s step, so parsed times cannot order messages. Read each "time"
+    # from the raw text instead and keep exact integer milliseconds.
+    var stamps = re.matchall("\"time\": *[0-9]+\\.?[0-9]*", body)
+    if size(stamps) != size(entries) return end
     var newest = self.console_time
     # Records are oldest to newest. Ignore stale responses left over
     # from a previous print (or from before this script was loaded).
-    var cutoff = epoch_ms() / 1000 - 120
-    for item : entries
-      if isinstance(item, map)
-        var ts = item.find("time")
+    var cutoff = epoch_ms() - 120000
+    var i = 0
+    while i < size(entries)
+      var item = entries[i]
+      var m = re.search("([0-9]+)\\.?([0-9]*)$", stamps[i])
+      if m != nil && isinstance(item, map)
+        var frac = (m[2] == nil ? "" : m[2]) + "000"
+        var stamp = int(m[1]) * 1000 + int(frac[0..2])
         var msg = item.find("message")
-        var kind = item.find("type")
-        if ts != nil && msg != nil
-          var stamp = num(ts)
-          if stamp > self.console_time && stamp >= cutoff
-            if kind == "response" self.stage_from_console(msg) end
-          end
-          if stamp > newest newest = stamp end
+        if type(msg) == "string" && stamp > self.console_time && stamp >= cutoff
+          if item.find("type") == "response" self.stage_from_console(msg) end
         end
+        if stamp > newest newest = stamp end
       end
+      i += 1
     end
     self.console_time = newest
   end
