@@ -56,7 +56,7 @@
 # @config   notify_tool bool "Notify active tool changes" default=false group="Alerts" help="One silent notification after toolhead.extruder changes while printing."
 # @config   show_active_tool bool "Active tool on main screen" default=true group="Display" help="Show active extruder next to ETA when there is enough room."
 # @config   tool_numbering select "Tool label style" default=klipper options=klipper,head group="Display" help="Klipper: T0/T1/T2/T3. Head: H1/H2/H3/H4 for physical head numbers."
-# @config   demo_tool select "Preview active tool" default=extruder2 options=extruder,extruder1,extruder2,extruder3 group="Display" help="Used only in Preview without printing."
+# @config   demo_tool select "Preview active tool" default=extruder2 options=extruder,extruder1,extruder2,extruder3,extruder4,extruder5,extruder6,extruder7,extruder8 group="Display" help="Used only in Preview without printing. The preview printer has 4 heads, or more if needed."
 # @config   debug_tool bool "Log tool changes" default=false group="Connection" help="Write [KD TOOL] lines when the active Klipper extruder changes or is first detected."
 # @config   alert_offline bool "Monitor live-print disconnects" default=false group="Connection" help="Off by default. Warn only after a live print was seen; never alert for normal idle shutdown."
 # @config   notify_offline bool "Notify if print connection lost" default=false group="Connection" help="Requires Monitor live-print disconnects. Alerts after 3 failed polls. No sound."
@@ -301,6 +301,8 @@ class KlipperDashboard
 
     if self.demo
       self.state = self.demo_state
+      # The milestone preview is a print in progress; select shows the alert.
+      if self.demo_state == "milestone" self.state = "printing" end
       if self.demo_state == "filament_out"
         self.state = "paused"
         self.pause_reason = "FILAMENT OUT"
@@ -324,8 +326,13 @@ class KlipperDashboard
       self.tool_target = 215
       self.bed_target = 60
       self.material = "PLA"
-      self.slot_materials = ["PETG", "PETG", "PLA", "TPU"]
-      self.slot_subtypes = ["", "Support PETG", "", ""]
+      self.slot_materials = ["PETG", "PETG", "PLA", "TPU", "ABS", "ASA", "PLA", "PETG", "PLA-CF"]
+      self.slot_subtypes = ["", "Support PETG", "", "", "", "", "", "Support", ""]
+      # A 4-head preview printer, grown to include the chosen preview head.
+      var heads = max(4, self.tool_index() + 1)
+      while size(self.extruders) < heads
+        self.extruders.push(size(self.extruders) == 0 ? "extruder" : "extruder" + str(size(self.extruders)))
+      end
       self.filament_used = 4790
       self.filament_total = 7500
       self.filament_weight_total = 22.4
@@ -669,7 +676,9 @@ class KlipperDashboard
         end
       end
       if self.notify_tool && old_tool != self.tool && old_tool != ""
-        notify({"text": "TOOL " + self.tool, "textColor": 0x66CCFF, "durationMs": 3500})
+        # Same T/H numbering as the screen, plus the head's material if known.
+        var kind = self.material_for_tool(self.tool_index())
+        notify({"text": self.compact_tool_name() + (kind != "" ? " " + kind : ""), "textColor": 0x66CCFF, "durationMs": 3500})
       end
     end
     self.prev_layer = self.layer
@@ -1001,7 +1010,7 @@ class KlipperDashboard
   def is_preparing()
     if !self.show_prep || self.state != "printing" return false end
     if self.demo
-      return self.demo_state != "printing" && self.demo_state != "paused" && self.demo_state != "filament_out" && self.demo_state != "complete" && self.demo_state != "error"
+      return self.demo_state != "printing" && self.demo_state != "paused" && self.demo_state != "filament_out" && self.demo_state != "complete" && self.demo_state != "error" && self.demo_state != "milestone"
     end
     if self.layer == nil return false end
     # The timeout protects a printer whose slicer does not update CURRENT_LAYER.
@@ -1817,13 +1826,23 @@ class KlipperDashboard
     if self.state == "paused" return "PAUSED" end
     if self.remaining < 0 || hour() < 0 return "DONE --" end
     var seconds = hour() * 3600 + minute() * 60 + self.remaining
+    var days = int(seconds / 86400)
     var h24 = int(seconds / 3600) % 24
     var mm = int(seconds / 60) % 60
-    var mark = "a"
-    if h24 >= 12 mark = "p" end
-    var h12 = h24 % 12
-    if h12 == 0 h12 = 12 end
-    return format("DONE %d:%02d%s", h12, mm, mark)
+    # Follow the clock's own 12/24-hour setting (24 h out of the box).
+    var clock = ""
+    if settings.get("time24h") == false
+      var h12 = h24 % 12
+      if h12 == 0 h12 = 12 end
+      clock = format("%d:%02d%s", h12, mm, h24 >= 12 ? "p" : "a")
+    else
+      clock = format("%d:%02d", h24, mm)
+    end
+    # A job ending on a later day says so instead of looking like today.
+    if days > 0 clock += "+" + str(days) + "d" end
+    var label = "DONE " + clock
+    if text_ink_width(label) > width() label = clock end
+    return label
   end
 
   # In standard Klipper, extruder is T0, extruder1 is T1, etc.
@@ -1848,6 +1867,10 @@ class KlipperDashboard
   def valid_material_name(name)
     if type(name) != "string" return "" end
     var cleaned = string.toupper(string.tr(name, "\t\r\n", ""))
+    # "PLA; PETG" splits into " PETG": drop surrounding spaces only.
+    var trimmed = re.search("^ *(.*[^ ]) *$", cleaned)
+    if trimmed == nil return "" end
+    cleaned = trimmed[1]
     if cleaned == "" || cleaned == "NONE" || cleaned == "UNKNOWN" || cleaned == "-" return "" end
     if re.search("SUPPORT|SUPP", cleaned) != nil
       cleaned = string.replace(cleaned, "SUPPORT", "SUP")
@@ -1937,7 +1960,10 @@ class KlipperDashboard
 
     var tool_no = str(self.tool_index())
     self.active_tool_label = ""
-    if self.tool_seen self.active_tool_label = self.compact_tool_name() end
+    # The badge only helps when there is more than one head to tell apart.
+    if self.tool_seen && (size(self.extruders) > 1 || self.tool != "extruder")
+      self.active_tool_label = self.compact_tool_name()
+    end
     var display_tool = self.compact_tool_name()
     self.tool_label = display_tool + " --"
     if self.tool_temp != nil
@@ -2169,8 +2195,9 @@ class KlipperDashboard
       if bx < width() text(bx, 6 + oy, self.bed_label, 0x66C8FF) end
       text(0, 14 + oy, self.finish_label, 0xFFC050)
     elif idx == 2
-      # A shorter, cached label; scroll_text moves only when it still cannot fit.
-      if oy == 0
+      # scroll_text centres text that fits, while a sliding page uses text():
+      # only scroll a name that is too wide, so it never jumps after a slide.
+      if oy == 0 && text_ink_width(self.file_label) > width()
         scroll_text(0, 6 + oy, width(), self.file_label, 0x44CCFF)
       else
         text(0, 6 + oy, self.file_label, 0x44CCFF)
