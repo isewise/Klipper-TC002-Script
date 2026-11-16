@@ -5,6 +5,7 @@
 # @config   host    text    "Moonraker IP or hostname" default="" group="Connection" help="No http:// prefix. Set your printer's LAN address."
 # @config   port    number  "Moonraker port" default=7125 min=1 max=65535 group="Connection"
 # @config   poll    number  "Refresh interval" default=8 min=3 max=60 unit=s group="Connection"
+# @config   idle_poll number "Idle refresh interval" default=30 min=10 max=300 unit=s group="Connection" help="Used while no print is running or the printer is off, to keep the shared HTTP queue free."
 # @config   style select "Animation profile" default=standard options=minimal,standard,expressive group="Animations" help="Minimal: static bar; Standard: familiar gradient; Expressive: animated preparation and printer scene. Sounds are independent."
 # @config   page_fx select "Printing page transitions" default=auto options=auto,off,slide group="Animations" help="Auto uses no transitions in Minimal, 450 ms vertical slides in Standard/Expressive."
 # @config   printer_scene bool "Animated printer page" default=true group="Animations" help="Expressive only: adds an original miniature printer and growing model scene."
@@ -73,18 +74,18 @@ class KlipperDashboard
   var observed, in_flight, correction, prelayer_zero
   var show_prep, console_stages, tool_target, bed_target
   var phase_name, phase_detail, phase_time, phase_ttl, phase_label, phase_sub
-  var console_busy, console_time, stage_tick, display_busy, m117, m117_last
+  var console_busy, console_time, stage_tick, m117, m117_last
   var probe_x, probe_y, probe_time
   var notify_pause, sound_pause, notify_first, notify_half, notify_ninety, sound_milestone
   var heat_progress, show_material, notify_tool, alert_offline, notify_offline
   var show_active_tool, tool_numbering, demo_tool, debug_tool, tool_seen, tool_logged, active_tool_label
   var prev_layer, prev_pct, prev_tool, first_alerted, half_alerted, ninety_alerted
   var filament_used, filament_total, filament_weight_total, material, material_label, used_label, planned_label
-  var meta_materials, meta_tools, slot_materials, slot_subtypes, slot_supported, slot_busy, slot_last
+  var meta_materials, meta_tools, slot_materials, slot_subtypes, slot_supported
   var show_pips, filament_units, filament_dia, filament_density, filament_alt_grams, tool_count
   var heat_bed_start, heat_bed_goal, heat_tool_start, heat_tool_goal, heat_pct
-  var capabilities_loaded, capabilities_busy, capability_tick, sensor_list, sensor_index
-  var sensor_busy, sensor_prior, sensor_loss_time, pause_reason, stats_message
+  var capabilities_loaded, capabilities_busy, capability_tick, sensor_list, extruders
+  var query_url, idle_poll, sensor_prior, sensor_loss_time, pause_reason, stats_message
   var offline_failures, offline, active_before_offline, last_state, paused_at
   var sound_error, done_audio, done_audio_value, pause_audio, pause_audio_value
   var runout_audio, runout_audio_value, milestone_audio, milestone_audio_value, error_audio, error_audio_value
@@ -101,6 +102,7 @@ class KlipperDashboard
     self.host = store.get("host", "")
     self.base = format("http://%s:%d", self.host, int(store.get("port", 7125)))
     self.poll_sec = max(3, int(store.get("poll", 8)))
+    self.idle_poll = max(self.poll_sec, min(300, int(store.get("idle_poll", 30))))
     self.turn_ms = max(4, int(store.get("turn", 8))) * 1000
     self.auto_pages = store.get("auto_pages", true)
     self.page_secs = max(2, min(12, int(store.get("page_secs", 3))))
@@ -184,7 +186,6 @@ class KlipperDashboard
     self.probe_x = nil
     self.probe_y = nil
     self.probe_time = 0
-    self.display_busy = false
     self.m117 = ""
     self.m117_last = ""
     self.phase_name = "PREPARING"
@@ -255,8 +256,6 @@ class KlipperDashboard
     self.slot_materials = []
     self.slot_subtypes = []
     self.slot_supported = false
-    self.slot_busy = false
-    self.slot_last = 0
     self.material_label = "MATERIAL --"
     self.used_label = "USED --"
     self.planned_label = ""
@@ -269,8 +268,7 @@ class KlipperDashboard
     self.capabilities_busy = false
     self.capability_tick = 0
     self.sensor_list = []
-    self.sensor_index = 0
-    self.sensor_busy = false
+    self.extruders = []
     self.sensor_prior = {}
     self.sensor_loss_time = 0
     self.pause_reason = ""
@@ -340,6 +338,7 @@ class KlipperDashboard
         self.tool_temp = 167
       end
     end
+    self.build_query()
     self.refresh_labels()
   end
 
@@ -367,9 +366,11 @@ class KlipperDashboard
     if !self.demo && self.host != ""
       if self.tick <= 0 && !self.in_flight
         self.in_flight = true
-        self.tick = self.poll_sec
-        http.get(self.base + "/printer/objects/query?print_stats&virtual_sdcard&toolhead",
-                 / body, status -> self.on_status(body, status))
+        # Every app shares one HTTP queue: poll quickly only during a job.
+        # An idle or switched-off printer is checked at the slower interval.
+        var busy = self.state == "printing" || self.state == "paused"
+        self.tick = busy ? self.poll_sec : self.idle_poll
+        http.get(self.query_url, / body, status -> self.on_status(body, status))
       end
       self.tick -= 1
       # Poll the lightweight console cache more frequently than the full
@@ -388,7 +389,31 @@ class KlipperDashboard
         self.stage_tick = 0
       end
     end
-    self.refresh_labels()
+    if self.demo || self.state == "printing" || self.state == "paused"
+      self.refresh_labels()
+    end
+  end
+
+  # One request per poll. Klipper answers objects it does not have with an
+  # empty map, so optional heaters, sensors and U1 slot data are safe to ask
+  # for. Field filters keep the response small. Rebuilt when capabilities load.
+  def build_query()
+    var q = self.base + "/printer/objects/query?print_stats=state,filename,print_duration,filament_used,message,info"
+    q += "&virtual_sdcard=progress,file_position&toolhead=extruder&display_status=message"
+    q += "&heater_bed=temperature,target"
+    if size(self.extruders) == 0
+      q += "&extruder=temperature,target"
+    end
+    for e : self.extruders
+      q += "&" + e + "=temperature,target"
+    end
+    for s : self.sensor_list
+      q += "&" + self.encode_name(s) + "=filament_detected,enabled"
+    end
+    if self.slot_supported
+      q += "&print_task_config=filament_type,filament_sub_type"
+    end
+    self.query_url = q
   end
 
   # A damaged or truncated response should not stop the AWTRIX script.
@@ -403,33 +428,17 @@ class KlipperDashboard
 
   def on_status(body, status)
     self.in_flight = false
-    if body == nil || status != 200
-      self.on_failed_status()
-      return
+    var values = nil
+    if body != nil && status == 200
+      var doc = self.safe_json(body)
+      if isinstance(doc, map)
+        var result = doc.find("result")
+        if isinstance(result, map) values = result.find("status") end
+      end
     end
-    var doc = self.safe_json(body)
-    if !isinstance(doc, map)
-      self.on_failed_status()
-      return
-    end
-    var result = doc.find("result")
-    if !isinstance(result, map)
-      self.on_failed_status()
-      return
-    end
-    var values = result.find("status")
-    if !isinstance(values, map)
-      self.on_failed_status()
-      return
-    end
-    var stats = values.find("print_stats")
-    if !isinstance(stats, map)
-      self.on_failed_status()
-      return
-    end
-
-    var st = stats.find("state")
-    if st == nil
+    var stats = isinstance(values, map) ? values.find("print_stats") : nil
+    var st = isinstance(stats, map) ? stats.find("state") : nil
+    if type(st) != "string"
       self.on_failed_status()
       return
     end
@@ -448,6 +457,20 @@ class KlipperDashboard
     var old_layer = self.prev_layer
     var old_tool = self.tool
     var was_active = (self.state == "printing" || self.state == "paused") && (now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000))
+    # Judge sensors against the previous poll BEFORE handling a pause.
+    # Klipper pauses ~0.5 s after a runout, so the sensor is usually seen
+    # empty in the same poll that first reports "paused". Sensors of unused
+    # heads may stay empty; only a witnessed full-to-empty change counts.
+    for name : self.sensor_list
+      var sensor = values.find(name)
+      if isinstance(sensor, map) && sensor.find("enabled") == true
+        var detected = sensor.find("filament_detected")
+        if detected == false && self.sensor_prior.find(name) == true && previous_state == "printing"
+          self.sensor_loss_time = now_ms()
+        end
+        if detected != nil self.sensor_prior[name] = detected end
+      end
+    end
     if self.observed && was_active
       if st == "complete" && self.notify_done
         self.completion_alert()
@@ -492,11 +515,19 @@ class KlipperDashboard
       self.heat_tool_goal = nil
       self.tool_seen = false
       self.tool_logged = false
+      # Re-read heads and sensors once per job: Klipper may have restarted
+      # with a different configuration since the last print.
+      self.capabilities_loaded = false
+      self.capability_tick = 0
     end
     # A pause must be witnessed. Never announce a pause on first connection.
     if self.observed && previous_state == "printing" && st == "paused" && was_active
       self.paused_at = now_ms()
       self.pause_reason = self.infer_pause_reason(stats.find("message"))
+      # Show the status page (PAUSED / reason) rather than freezing
+      # whichever page was up when cycling stopped.
+      self.page = 0
+      self.prev_page = -1
       if self.notify_pause self.pause_alert() end
     end
     self.observed = true
@@ -510,7 +541,15 @@ class KlipperDashboard
     end
     self.stats_message = stats.find("message")
     if self.stats_message == nil self.stats_message = "" end
-    if st == "paused" self.pause_reason = self.infer_pause_reason(self.stats_message) end
+    # Keep the reason decided when the pause began; the sensor evidence is
+    # time-limited and must not turn CHECK FILAMENT into PRINT PAUSED later.
+    # Only an explicit runout message may upgrade it.
+    if st == "paused"
+      var reason = self.infer_pause_reason(self.stats_message)
+      if self.pause_reason == "" || reason == "FILAMENT OUT" self.pause_reason = reason end
+    else
+      self.pause_reason = ""
+    end
 
     var file = stats.find("filename")
     if file != nil && file != self.filename
@@ -621,34 +660,55 @@ class KlipperDashboard
     end
     self.prev_layer = self.layer
     self.prev_pct = self.pct
-    if size(self.sensor_list) > 0 && !self.sensor_busy
-      var sn = self.sensor_list[self.sensor_index]
-      self.sensor_index = (self.sensor_index + 1) % size(self.sensor_list)
-      self.sensor_busy = true
-      http.get(self.base + "/printer/objects/query?" + self.encode_name(sn),
-               / body, status -> self.on_sensor(sn, body, status))
-    end
-    # Temperature calls are separate: absent bed heaters do not break main status.
-    var active = self.tool
-    http.get(self.base + "/printer/objects/query?" + active + "=temperature,target",
-             / body, status -> self.on_tool_temperature(active, body, status))
-    http.get(self.base + "/printer/objects/query?heater_bed=temperature,target",
-             / body, status -> self.on_bed_temperature(body, status))
-    # U1 and compatible firmware may publish actual material loaded per head.
-    # Generic Klipper printers simply skip this optional request.
-    if self.show_material && self.slot_supported && !self.slot_busy
-      if self.slot_last == 0 || now_ms() - self.slot_last >= 30000
-        self.slot_last = now_ms()
-        self.slot_busy = true
-        http.get(self.base + "/printer/objects/query?print_task_config",
-                 / body, status -> self.on_slot_materials(body, status), {"cap": 8192})
+
+    # Active head and bed temperatures. A heating stage records its starting
+    # temperature so the warm-up bar measures real progress toward target.
+    var printing = st == "printing"
+    var t = values.find(self.tool)
+    if isinstance(t, map)
+      var n = t.find("temperature")
+      if n != nil self.tool_temp = num(n) end
+      n = t.find("target")
+      if n != nil self.tool_target = num(n) end
+      if printing && self.tool_target != nil && self.tool_temp != nil
+        if self.tool_target >= 50 && self.tool_target - self.tool_temp > 4 && self.heat_tool_goal != self.tool_target
+          self.heat_tool_goal = self.tool_target
+          self.heat_tool_start = self.tool_temp
+        end
       end
     end
+    t = values.find("heater_bed")
+    if isinstance(t, map)
+      var n = t.find("temperature")
+      if n != nil self.bed_temp = num(n) end
+      n = t.find("target")
+      if n != nil self.bed_target = num(n) end
+      if printing && self.bed_target != nil && self.bed_temp != nil
+        if self.bed_target >= 30 && self.bed_target - self.bed_temp > 3 && self.heat_bed_goal != self.bed_target
+          self.heat_bed_goal = self.bed_target
+          self.heat_bed_start = self.bed_temp
+        end
+      end
+    end
+
+    # U1 and compatible firmware publish the material loaded in each head.
+    var cfg = values.find("print_task_config")
+    if isinstance(cfg, map)
+      var types = cfg.find("filament_type")
+      if isinstance(types, list)
+        self.slot_materials = types
+        var subtypes = cfg.find("filament_sub_type")
+        self.slot_subtypes = isinstance(subtypes, list) ? subtypes : []
+      end
+    end
+
+    # M117 text is only a fallback stage label while preparing.
     if self.is_preparing()
-      if !self.display_busy
-        self.display_busy = true
-        http.get(self.base + "/printer/objects/query?display_status",
-                 / body, status -> self.on_display_status(body, status))
+      var ds = values.find("display_status")
+      var msg = isinstance(ds, map) ? ds.find("message") : nil
+      if type(msg) == "string"
+        if msg != "" && msg != self.m117_last self.m117 = msg end
+        self.m117_last = msg
       end
     end
     self.update_eta()
@@ -680,65 +740,24 @@ class KlipperDashboard
     if !isinstance(r, map) return end
     var objects = r.find("objects")
     if !isinstance(objects, list) return end
+    # Every head (extruder, extruder1 ... up to 16) and every filament
+    # sensor, so 8- and 9-head machines are fully covered.
     self.sensor_list = []
-    self.sensor_index = 0
+    self.extruders = []
+    self.slot_supported = false
     for obj : objects
       if type(obj) == "string"
-        if obj == "print_task_config" self.slot_supported = true end
-        if string.startswith(obj, "filament_switch_sensor ") || string.startswith(obj, "filament_motion_sensor ")
-          if size(self.sensor_list) < 6 self.sensor_list.push(obj) end
+        if obj == "print_task_config"
+          self.slot_supported = true
+        elif re.match("^extruder[0-9]*$", obj) != nil
+          if size(self.extruders) < 16 self.extruders.push(obj) end
+        elif string.startswith(obj, "filament_switch_sensor ") || string.startswith(obj, "filament_motion_sensor ")
+          if size(self.sensor_list) < 16 self.sensor_list.push(obj) end
         end
       end
     end
     self.capabilities_loaded = true
-  end
-
-  # Optional Snapmaker U1 per-physical-head filament data, safely ignored
-  # when the object is absent. A slot's type can be PETG with subtype SUPPORT.
-  def on_slot_materials(body, status)
-    self.slot_busy = false
-    if body == nil || status != 200 return end
-    var doc = self.safe_json(body)
-    if !isinstance(doc, map) return end
-    var r = doc.find("result")
-    if !isinstance(r, map) return end
-    var values = r.find("status")
-    if !isinstance(values, map) return end
-    var cfg = values.find("print_task_config")
-    if !isinstance(cfg, map) return end
-    var types = cfg.find("filament_type")
-    if !isinstance(types, list) return end
-    self.slot_materials = types
-    var subtypes = cfg.find("filament_sub_type")
-    if isinstance(subtypes, list)
-      self.slot_subtypes = subtypes
-    else
-      self.slot_subtypes = []
-    end
-    self.refresh_labels()
-  end
-
-  def on_sensor(name, body, status)
-    self.sensor_busy = false
-    if body == nil || status != 200 return end
-    var doc = self.safe_json(body)
-    if !isinstance(doc, map) return end
-    var r = doc.find("result")
-    if !isinstance(r, map) return end
-    var values = r.find("status")
-    if !isinstance(values, map) return end
-    var sensor = values.find(name)
-    if !isinstance(sensor, map) return end
-    var detected = sensor.find("filament_detected")
-    var enabled = sensor.find("enabled")
-    if detected == nil || enabled != true return end
-    var earlier = self.sensor_prior.find(name)
-    # Sensors for UNUSED tools can be empty all the time. Only record a
-    # true-to-false transition witnessed while a print is running.
-    if earlier == true && detected == false && self.state == "printing"
-      self.sensor_loss_time = now_ms()
-    end
-    self.sensor_prior[name] = detected
+    self.build_query()
   end
 
   # Do not infer 'runout' from a sensor that simply lacks loaded filament.
@@ -956,56 +975,6 @@ class KlipperDashboard
     self.refresh_labels()
   end
 
-  def on_tool_temperature(active, body, status)
-    if active != self.tool || body == nil || status != 200 return end
-    var doc = self.safe_json(body)
-    if !isinstance(doc, map) return end
-    var r = doc.find("result")
-    if !isinstance(r, map) return end
-    var values = r.find("status")
-    if !isinstance(values, map) return end
-    var t = values.find(active)
-    if !isinstance(t, map) return end
-    var n = t.find("temperature")
-    if n != nil self.tool_temp = num(n) end
-    n = t.find("target")
-    if n != nil self.tool_target = num(n) end
-    if self.tool_target != nil && self.tool_temp != nil && self.state == "printing"
-      if self.tool_target >= 50 && self.tool_target - self.tool_temp > 4
-        if self.heat_tool_goal == nil || self.heat_tool_goal != self.tool_target
-          self.heat_tool_goal = self.tool_target
-          self.heat_tool_start = self.tool_temp
-        end
-      end
-    end
-    self.refresh_labels()
-  end
-
-  def on_bed_temperature(body, status)
-    if body == nil || status != 200 return end
-    var doc = self.safe_json(body)
-    if !isinstance(doc, map) return end
-    var r = doc.find("result")
-    if !isinstance(r, map) return end
-    var values = r.find("status")
-    if !isinstance(values, map) return end
-    var t = values.find("heater_bed")
-    if !isinstance(t, map) return end
-    var n = t.find("temperature")
-    if n != nil self.bed_temp = num(n) end
-    n = t.find("target")
-    if n != nil self.bed_target = num(n) end
-    if self.bed_target != nil && self.bed_temp != nil && self.state == "printing"
-      if self.bed_target >= 30 && self.bed_target - self.bed_temp > 3
-        if self.heat_bed_goal == nil || self.heat_bed_goal != self.bed_target
-          self.heat_bed_goal = self.bed_target
-          self.heat_bed_start = self.bed_temp
-        end
-      end
-    end
-    self.refresh_labels()
-  end
-
   # Only use explicit layer tracking for the startup/printing transition.
   # On printers that never report a layer, the normal progress view still works.
   def is_preparing()
@@ -1119,24 +1088,6 @@ class KlipperDashboard
       i += 1
     end
     self.console_time = newest
-  end
-
-  def on_display_status(body, status)
-    self.display_busy = false
-    if body == nil || status != 200 || !self.is_preparing() return end
-    var doc = self.safe_json(body)
-    if !isinstance(doc, map) return end
-    var result = doc.find("result")
-    if !isinstance(result, map) return end
-    var values = result.find("status")
-    if !isinstance(values, map) return end
-    var ds = values.find("display_status")
-    if !isinstance(ds, map) return end
-    var msg = ds.find("message")
-    if msg != nil && msg != "" && msg != self.m117_last
-      self.m117 = msg
-    end
-    if msg != nil self.m117_last = msg end
   end
 
   # Favor reliable action codes; otherwise choose a real heater target and
