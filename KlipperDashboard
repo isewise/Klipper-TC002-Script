@@ -85,7 +85,7 @@ class KlipperDashboard
   var show_pips, filament_units, filament_dia, filament_density, filament_alt_grams, tool_count
   var heat_bed_start, heat_bed_goal, heat_tool_start, heat_tool_goal, heat_pct
   var capabilities_loaded, capabilities_busy, capability_tick, sensor_list, extruders
-  var query_url, idle_poll, sensor_prior, sensor_loss_time, pause_reason, stats_message
+  var query_url, idle_poll, gcode_start, gcode_end, sensor_prior, sensor_loss_time, pause_reason, stats_message
   var offline_failures, offline, active_before_offline, last_state, paused_at
   var sound_error, done_audio, done_audio_value, pause_audio, pause_audio_value
   var runout_audio, runout_audio_value, milestone_audio, milestone_audio_value, error_audio, error_audio_value
@@ -269,6 +269,8 @@ class KlipperDashboard
     self.capability_tick = 0
     self.sensor_list = []
     self.extruders = []
+    self.gcode_start = nil
+    self.gcode_end = nil
     self.sensor_prior = {}
     self.sensor_loss_time = 0
     self.pause_reason = ""
@@ -483,6 +485,8 @@ class KlipperDashboard
       self.filename = ""
       self.file_label = "NO FILE"
       self.total_est = -1
+      self.gcode_start = nil
+      self.gcode_end = nil
       self.reset_eta()
       self.filament_used = nil
       self.filament_total = nil
@@ -556,6 +560,8 @@ class KlipperDashboard
       self.filename = file
       self.file_label = self.display_filename(file)
       self.total_est = -1
+      self.gcode_start = nil
+      self.gcode_end = nil
       self.reset_eta()
       self.filament_total = nil
       self.filament_weight_total = nil
@@ -574,11 +580,19 @@ class KlipperDashboard
     var card = values.find("virtual_sdcard")
     if isinstance(card, map)
       var p = card.find("progress")
+      # virtual_sdcard.progress counts the whole file: thumbnails before the
+      # first G-code and the slicer settings block after the last one. Use
+      # the metadata byte range when known, as Mainsail and Fluidd do, so a
+      # job runs 0-100% instead of jumping ahead and stopping near 97%.
+      var pos = card.find("file_position")
+      if self.gcode_end != nil && pos != nil
+        p = real(int(pos) - self.gcode_start) / (self.gcode_end - self.gcode_start)
+      end
       if p != nil
         self.eta_file_fraction = max(0.0, min(1.0, num(p)))
         # This is how much of the G-code FILE Klipper has read, not
         # necessarily how much physical printing has happened.
-        var raw_pct = int(max(0, min(100, num(p) * 100 + 0.5)))
+        var raw_pct = int(max(0, min(100, self.eta_file_fraction * 100 + 0.5)))
         if raw_pct >= 100
           self.pct = 100
         else
@@ -947,6 +961,13 @@ class KlipperDashboard
     if n != nil self.total_est = num(n) end
     n = r.find("filament_total")
     if n != nil self.filament_total = num(n) end
+    # Byte offsets are integers; keep them exact (reals are 32-bit here).
+    var first = r.find("gcode_start_byte")
+    var last = r.find("gcode_end_byte")
+    if first != nil && last != nil && int(last) > int(first)
+      self.gcode_start = int(first)
+      self.gcode_end = int(last)
+    end
     n = r.find("filament_weight_total")
     if n != nil && num(n) > 0 self.filament_weight_total = num(n) end
     n = r.find("filament_type")
