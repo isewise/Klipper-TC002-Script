@@ -11,6 +11,7 @@
 # @config   accent    color  "Progress color" default=#33EE88 group="Display"
 # @config   page_secs number "Seconds per page" default=3 min=2 max=12 unit=s group="Display" help="Pages cycle at this pace while printing; the app stays for one full cycle."
 # @config   show_material bool "Material page" default=true group="Display" help="The active tool's material and the filament used by the job."
+# @config   show_idle bool   "Show when idle" default=false group="Display" help="Stay in the rotation between prints: printer state, temperatures and the last job."
 # @config   tool_numbering select "Tool labels" default=klipper options=klipper,head group="Display" help="klipper: T0, T1, T2... head: H1, H2, H3... for printers that number heads from 1."
 # @config   filament_units select "Filament units" default=meters options=meters,grams,alternate group="Display" help="alternate switches between meters and grams on each visit to the material page."
 # @config   show_prep bool   "Show preparation stages" default=true group="Progress" help="Before the first layer, show what the printer is doing (heating, probing...) instead of 0%."
@@ -24,7 +25,7 @@
 # @config   sounds    select "Alert sounds" default=off options=off,failures,all group="Alerts" help="failures: errors, pauses and runouts. all: also finished and progress alerts."
 # @config   debug     bool   "Debug logging" default=false group="Advanced" help="Write [KD] lines about ETA, tools and sounds to the Log tab. Turn off after testing."
 # @config   demo      bool   "Preview without printing" default=false group="Advanced"
-# @config   demo_state select "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone group="Advanced" help="Shown while Preview is on. Press select to test that state's alert."
+# @config   demo_state select "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone,idle,offline group="Advanced" help="Shown while Preview is on. Press select to test that state's alert."
 
 # ======================================================================
 #  BEFORE YOU EDIT THIS SCRIPT
@@ -37,6 +38,16 @@
 #  WARNING: once you edit this script, AWTRIX stops offering you Hub
 #  updates for it. To get a newer version later, install it again from
 #  the Hub and redo your edits. Keep a copy of your changes.
+# ======================================================================
+#  CONNECTION TROUBLESHOOTING - the clock's Log tab shows [KD] lines:
+#  "No answer from http://...": check the printer address and port.
+#    7125 is Moonraker's own port; 80 also works when Mainsail or Fluidd
+#    serves the printer. The printer must be on the same network.
+#  "Moonraker refused access (HTTP 401/403)": Moonraker requires a login
+#    for this clock. In moonraker.conf, add the clock's IP address (or
+#    your network, e.g. 192.168.1.0/24) to trusted_clients in the
+#    [authorization] section, then restart Moonraker. API keys are not
+#    supported: the printer's address differs for every user.
 # ======================================================================
 
 import json
@@ -80,6 +91,9 @@ class KlipperDashboard
   var check_x, check_y, done_palette
   var m73_seen, m73_fraction, m73_change_work, homed_axes, homing_sub, homing_at
   var level_pending, level_name, meta_layers, meta_weights
+  var show_idle, pages, head_temp, head_target, head_text, head_label, head_color
+  var link_reason, link_lost_minutes, link_line1, link_line2, idle_status, idle_color, idle_temps, idle_last
+  var mmu_kind, afc_lanes, lane_tool, lane_mat, lane_col
 
   def init()
     # ------------------------------------------------------------------
@@ -125,6 +139,9 @@ class KlipperDashboard
     self.done_minutes = 10
     # Animated backgrounds on the "finished" and progress alert pop-ups.
     self.alert_effects = true
+    # Minutes the LINK LOST screen stays in the rotation after the printer
+    # stopped answering mid-print ("Printer lost mid-print" setting).
+    self.link_lost_minutes = 30
     # ------------------------------------------------------------------
 
     self.host = store.get("host", "")
@@ -309,6 +326,26 @@ class KlipperDashboard
     self.level_name = ""
     self.meta_layers = 0
     self.meta_weights = []
+    # Idle screen, all-heads page, connection notes and MMU/AFC lanes.
+    self.show_idle = store.get("show_idle", false)
+    self.pages = [0]
+    self.head_temp = []
+    self.head_target = []
+    self.head_text = []
+    self.head_label = []
+    self.head_color = []
+    self.link_reason = ""
+    self.link_line1 = "LINK LOST"
+    self.link_line2 = ""
+    self.idle_status = "OFFLINE"
+    self.idle_color = 0x6A7682
+    self.idle_temps = ""
+    self.idle_last = ""
+    self.mmu_kind = ""
+    self.afc_lanes = []
+    self.lane_tool = -1
+    self.lane_mat = []
+    self.lane_col = []
     self.observed = false
     self.in_flight = false
     self.accent = store.get("accent", 0x33EE88)
@@ -377,6 +414,31 @@ class KlipperDashboard
         self.finish_kind = self.state
         self.build_done_text()
       end
+      # Preview heads: the active one printing, two on standby, one cold.
+      var plan_t = [172, 25, 215, 168, 24, 24, 24, 24, 24]
+      var plan_g = [170, 0, 215, 170, 0, 0, 0, 0, 0]
+      var hi = 0
+      while hi < size(self.extruders)
+        self.head_temp.push(plan_t[hi % 9])
+        self.head_target.push(plan_g[hi % 9])
+        hi += 1
+      end
+      if self.demo_state == "idle"
+        self.state = "standby"
+        self.finish_kind = "complete"
+        self.finished_at = -10000000
+        self.build_done_text()
+        self.bed_temp = 41
+        self.bed_target = 0
+        self.tool_temp = 58
+        self.tool_target = 0
+        self.last_ok = now_ms()
+      elif self.demo_state == "offline"
+        self.state = "printing"
+        self.offline = true
+        self.alert_offline = true
+        self.last_ok = now_ms() - 240000
+      end
       if self.demo_state == "heating_bed"
         self.bed_temp = 42
       elif self.demo_state == "heating_nozzle"
@@ -384,6 +446,7 @@ class KlipperDashboard
       end
     end
     self.build_query()
+    self.build_pages()
     self.refresh_labels()
   end
 
@@ -408,12 +471,16 @@ class KlipperDashboard
   end
 
   def loop()
+    if !self.demo && self.host == "" && self.link_reason != "nohost"
+      self.link_reason = "nohost"
+      log("[KD] Set the printer address: Apps tab, gear button, Moonraker IP.")
+    end
     if !self.demo && self.host != ""
       if self.tick <= 0 && !self.in_flight
         self.in_flight = true
         # Every app shares one HTTP queue: poll quickly only during a job.
-        # An idle or switched-off printer is checked at the slower interval.
-        var busy = self.state == "printing" || self.state == "paused"
+        # An idle, switched-off or lost printer is checked more slowly.
+        var busy = (self.state == "printing" || self.state == "paused") && !self.offline
         self.tick = busy ? self.poll_sec : self.idle_poll
         http.get(self.query_url, / body, status -> self.on_status(body, status))
       end
@@ -434,9 +501,7 @@ class KlipperDashboard
         self.stage_tick = 0
       end
     end
-    if self.demo || self.state == "printing" || self.state == "paused"
-      self.refresh_labels()
-    end
+    self.refresh_labels()
   end
 
   # One request per poll. Klipper answers objects it does not have with an
@@ -459,6 +524,17 @@ class KlipperDashboard
     end
     if self.slot_supported
       q += "&print_task_config=filament_type,filament_sub_type,filament_color"
+    end
+    # DRAFT: multi-material units. Happy Hare reports the active tool and
+    # each gate's material/colour in 'mmu'; AFC (Box Turtle and others)
+    # reports the current lane in 'AFC' and each lane's data separately.
+    if self.mmu_kind == "hh"
+      q += "&mmu=tool,gate,num_gates,ttg_map,gate_material,gate_color"
+    elif self.mmu_kind == "afc"
+      q += "&AFC=current_lane,current_state"
+      for lane : self.afc_lanes
+        q += "&" + self.encode_name(lane) + "=map,material,color,status"
+      end
     end
     self.query_url = q
   end
@@ -486,9 +562,11 @@ class KlipperDashboard
     var stats = isinstance(values, map) ? values.find("print_stats") : nil
     var st = isinstance(stats, map) ? stats.find("state") : nil
     if type(st) != "string"
+      self.note_link(body == nil ? "noanswer" : (status == 401 || status == 403 ? "auth" : "http"), status)
       self.on_failed_status()
       return
     end
+    self.note_link("", status)
     self.offline_failures = 0
     self.offline = false
     if !self.capabilities_loaded && !self.capabilities_busy && self.capability_tick <= 0
@@ -503,6 +581,7 @@ class KlipperDashboard
     var old_pct = self.prev_pct
     var old_layer = self.prev_layer
     var old_tool = self.tool
+    var old_index = self.tool_index()
     var was_active = (self.state == "printing" || self.state == "paused") && (now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000))
     # Judge sensors against the previous poll BEFORE handling a pause.
     # Klipper pauses ~0.5 s after a runout, so the sensor is usually seen
@@ -600,6 +679,8 @@ class KlipperDashboard
     if st != "printing" && st != "paused"
       self.prev_pct = nil
       self.prev_layer = nil
+      # Idle: still follow the heaters for the idle screen.
+      self.parse_heaters(values, false)
       return
     end
     self.stats_message = stats.find("message")
@@ -752,6 +833,8 @@ class KlipperDashboard
       end
     end
 
+    self.parse_lanes(values)
+
     # Explicit first-layer and approximate file-progress milestones.
     if st == "printing" && was_active && previous_state == "printing"
       if self.notify_first && !self.first_alerted && old_layer != nil && self.layer != nil
@@ -772,7 +855,7 @@ class KlipperDashboard
           self.milestone_alert("PRINT 90%")
         end
       end
-      if self.notify_tool && old_tool != self.tool && old_tool != ""
+      if self.notify_tool && old_index != self.tool_index()
         # Same T/H numbering as the screen, plus the head's material if known.
         var kind = self.material_for_tool(self.tool_index())
         notify({"text": self.compact_tool_name() + (kind != "" ? " " + kind : ""), "textColor": 0x66CCFF, "durationMs": 3500})
@@ -783,33 +866,7 @@ class KlipperDashboard
 
     # Active head and bed temperatures. A heating stage records its starting
     # temperature so the warm-up bar measures real progress toward target.
-    var printing = st == "printing"
-    var t = values.find(self.tool)
-    if isinstance(t, map)
-      var n = t.find("temperature")
-      if n != nil self.tool_temp = num(n) end
-      n = t.find("target")
-      if n != nil self.tool_target = num(n) end
-      if printing && self.tool_target != nil && self.tool_temp != nil
-        if self.tool_target >= 50 && self.tool_target - self.tool_temp > 4 && self.heat_tool_goal != self.tool_target
-          self.heat_tool_goal = self.tool_target
-          self.heat_tool_start = self.tool_temp
-        end
-      end
-    end
-    t = values.find("heater_bed")
-    if isinstance(t, map)
-      var n = t.find("temperature")
-      if n != nil self.bed_temp = num(n) end
-      n = t.find("target")
-      if n != nil self.bed_target = num(n) end
-      if printing && self.bed_target != nil && self.bed_temp != nil
-        if self.bed_target >= 30 && self.bed_target - self.bed_temp > 3 && self.heat_bed_goal != self.bed_target
-          self.heat_bed_goal = self.bed_target
-          self.heat_bed_start = self.bed_temp
-        end
-      end
-    end
+    self.parse_heaters(values, st == "printing")
 
     # Gantry levelling (Voron QGL, Z-tilt) not yet applied: probing now is
     # levelling, not a mesh. When it completes, the mesh map starts fresh.
@@ -890,9 +947,17 @@ class KlipperDashboard
     self.sensor_list = []
     self.extruders = []
     self.slot_supported = false
+    self.mmu_kind = ""
+    self.afc_lanes = []
     for obj : objects
       if type(obj) == "string"
-        if obj == "print_task_config"
+        if obj == "mmu"
+          self.mmu_kind = "hh"
+        elif obj == "AFC"
+          if self.mmu_kind == "" self.mmu_kind = "afc" end
+        elif string.startswith(obj, "AFC_lane ")
+          if size(self.afc_lanes) < 16 self.afc_lanes.push(obj) end
+        elif obj == "print_task_config"
           self.slot_supported = true
         elif re.match("^extruder[0-9]*$", obj) != nil
           if size(self.extruders) < 16 self.extruders.push(obj) end
@@ -903,6 +968,7 @@ class KlipperDashboard
     end
     self.capabilities_loaded = true
     self.build_query()
+    self.build_pages()
   end
 
   # Do not infer 'runout' from a sensor that simply lacks loaded filament.
@@ -2025,6 +2091,8 @@ class KlipperDashboard
   # In standard Klipper, extruder is T0, extruder1 is T1, etc.
   # Physical Snapmaker U1 heads are numbered 1-4, hence the alternate H style.
   def tool_index()
+    # A multi-material unit feeding one nozzle reports the real tool.
+    if self.lane_tool >= 0 && size(self.extruders) <= 1 return self.lane_tool end
     if self.tool == "extruder" return 0 end
     var suffix = string.replace(self.tool, "extruder", "")
     if suffix == "" return 0 end
@@ -2058,6 +2126,11 @@ class KlipperDashboard
   # Only treat slicer material arrays as per-tool data when they can be mapped
   # unambiguously to Klipper T numbers, or when the entire job is one type.
   def material_for_tool(index)
+    # Live MMU / AFC lane data first: it is what is actually loaded.
+    if index >= 0 && index < size(self.lane_mat)
+      var lane = self.valid_material_name(self.lane_mat[index])
+      if lane != "" return lane end
+    end
     # Firmware physical slot list: highest-confidence source for U1.
     if index >= 0 && index < size(self.slot_materials)
       var slot = self.valid_material_name(self.slot_materials[index])
@@ -2116,6 +2189,7 @@ class KlipperDashboard
   end
 
   def refresh_labels()
+    self.refresh_extra_labels()
     self.remaining = -1
     if self.demo
       if self.total_est > self.elapsed
@@ -2140,7 +2214,7 @@ class KlipperDashboard
 
     self.active_tool_label = ""
     # The badge only helps when there is more than one head to tell apart.
-    if self.tool_seen && (size(self.extruders) > 1 || self.tool != "extruder")
+    if self.tool_seen && (size(self.extruders) > 1 || self.tool != "extruder" || self.lane_tool >= 0)
       self.active_tool_label = self.compact_tool_name()
     end
     var display_tool = self.compact_tool_name()
@@ -2218,19 +2292,30 @@ class KlipperDashboard
 
   def should_show()
     if self.demo return true end
-    if self.offline && self.alert_offline return true end
+    if self.showing_link_lost() return true end
     if self.showing_done() return true end
-    if self.state != "printing" && self.state != "paused" return false end
-    return now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000)
+    if self.state != "printing" && self.state != "paused" return self.show_idle end
+    if now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000) return true end
+    return self.show_idle
   end
 
   # The duration is chosen once when the app enters the rotation. Use
   # one complete cycle when actively printing, so every enabled page appears.
   # Pauses and startup phases remain a single status screen.
   def page_count()
-    var n = self.show_material ? 4 : 3
-    if self.style == "expressive" n += 1 end
-    return n
+    return size(self.pages)
+  end
+
+  # Page ids: 0 main, 1 active head + bed, 2 all heads (several heads only),
+  # 3 file, 4 material (optional), 5 printer scene (Expressive).
+  def build_pages()
+    self.pages = [0, 1]
+    if size(self.extruders) > 1 self.pages.push(2) end
+    self.pages.push(3)
+    if self.show_material self.pages.push(4) end
+    if self.style == "expressive" self.pages.push(5) end
+    if self.page >= size(self.pages) self.page = 0 end
+    self.prev_page = -1
   end
 
   def cycling_now()
@@ -2255,7 +2340,7 @@ class KlipperDashboard
   # whole app appears (which may happen before reaching the material page).
   # Save the last unit so reloading the Berry script does not reset the cycle.
   def on_material_page_enter()
-    if !self.show_material || self.page != 3 || self.filament_units != "alternate" return end
+    if self.pages[self.page] != 4 || self.filament_units != "alternate" return end
     self.filament_alt_grams = !self.filament_alt_grams
     store.set("filament_alt_grams_last", self.filament_alt_grams)
     self.refresh_labels()
@@ -2359,6 +2444,12 @@ class KlipperDashboard
   # Same source order and tool mapping as material_for_tool(). An empty U1
   # slot reports material NONE with a white colour: ignore that colour.
   def color_for_tool(index)
+    if index >= 0 && index < size(self.lane_col) && index < size(self.lane_mat)
+      if self.valid_material_name(self.lane_mat[index]) != ""
+        var lane = self.color_value(self.lane_col[index])
+        if lane >= 0 return lane end
+      end
+    end
     if index >= 0 && index < size(self.slot_colors) && index < size(self.slot_materials)
       if self.valid_material_name(self.slot_materials[index]) != ""
         var slot = self.color_value(self.slot_colors[index])
@@ -2480,7 +2571,7 @@ class KlipperDashboard
   # --- Finish screen ----------------------------------------------------
   def showing_done()
     if self.finish_kind == "" return false end
-    if self.demo return true end
+    if self.demo return self.state == "complete" || self.state == "error" end
     return self.done_minutes > 0 && now_ms() - self.finished_at < self.done_minutes * 60000
   end
 
@@ -2532,6 +2623,315 @@ class KlipperDashboard
     self.draw_comet_bar(100, 0x44EE99, false)
   end
 
+  # --- Connection notes -------------------------------------------------
+  # One log line per change of connection state, never one per poll. The
+  # device log keeps 120 characters per line, so messages stay short.
+  def note_link(reason, status)
+    if reason == self.link_reason return end
+    var was = self.link_reason
+    self.link_reason = reason
+    if reason == ""
+      if was != "" && was != "nohost" log("[KD] Moonraker answers again.") end
+    elif reason == "auth"
+      log(format("[KD] Moonraker refused access (HTTP %d): it requires a login.", status))
+      log("[KD] Add this clock to trusted_clients in moonraker.conf [authorization].")
+    elif reason == "noanswer"
+      log("[KD] No answer from " + self.base + " - check address, port and power.")
+    elif status == 200
+      log("[KD] Moonraker's reply could not be read.")
+    else
+      log(format("[KD] Moonraker answered HTTP %d to the status query.", status))
+    end
+  end
+
+  # --- Heaters and lanes --------------------------------------------------
+  # Active head and bed, plus every head for the all-heads page. A heating
+  # stage records its starting temperature so the warm-up bar is real.
+  def parse_heaters(values, printing)
+    var t = values.find(self.tool)
+    if isinstance(t, map)
+      var n = t.find("temperature")
+      if n != nil self.tool_temp = num(n) end
+      n = t.find("target")
+      if n != nil self.tool_target = num(n) end
+      if printing && self.tool_target != nil && self.tool_temp != nil
+        if self.tool_target >= 50 && self.tool_target - self.tool_temp > 4 && self.heat_tool_goal != self.tool_target
+          self.heat_tool_goal = self.tool_target
+          self.heat_tool_start = self.tool_temp
+        end
+      end
+    end
+    t = values.find("heater_bed")
+    if isinstance(t, map)
+      var n = t.find("temperature")
+      if n != nil self.bed_temp = num(n) end
+      n = t.find("target")
+      if n != nil self.bed_target = num(n) end
+      if printing && self.bed_target != nil && self.bed_temp != nil
+        if self.bed_target >= 30 && self.bed_target - self.bed_temp > 3 && self.heat_bed_goal != self.bed_target
+          self.heat_bed_goal = self.bed_target
+          self.heat_bed_start = self.bed_temp
+        end
+      end
+    end
+    var count = 0
+    for e : self.extruders
+      count = max(count, self.extruder_number(e) + 1)
+    end
+    while size(self.head_temp) < count
+      self.head_temp.push(-1)
+      self.head_target.push(0)
+    end
+    for e : self.extruders
+      var h = values.find(e)
+      if isinstance(h, map)
+        var i = self.extruder_number(e)
+        self.head_temp[i] = num(h.find("temperature"), -1)
+        self.head_target[i] = num(h.find("target"), 0)
+      end
+    end
+  end
+
+  def extruder_number(name)
+    if name == "extruder" return 0 end
+    return int(num(string.replace(name, "extruder", ""), 0))
+  end
+
+  # DRAFT, untested on real hardware: Happy Hare and AFC report which tool
+  # a single-nozzle multi-material unit is feeding, and what each gate or
+  # lane holds. Field names follow each project's documentation.
+  def parse_lanes(values)
+    if self.mmu_kind == "hh"
+      var m = values.find("mmu")
+      if !isinstance(m, map) return end
+      var tool = m.find("tool")
+      self.lane_tool = type(tool) == "int" ? tool : -1
+      var mats = m.find("gate_material")
+      var cols = m.find("gate_color")
+      var ttg = m.find("ttg_map")
+      self.lane_mat = []
+      self.lane_col = []
+      if isinstance(mats, list) && isinstance(cols, list)
+        # Tools map to gates through ttg_map; without it, tool n = gate n.
+        var n = isinstance(ttg, list) ? size(ttg) : size(mats)
+        var i = 0
+        while i < n
+          var g = isinstance(ttg, list) ? int(num(ttg[i], i)) : i
+          var ok = g >= 0 && g < size(mats) && g < size(cols)
+          self.lane_mat.push(ok ? mats[g] : "")
+          self.lane_col.push(ok ? self.mmu_color(cols[g]) : "")
+          i += 1
+        end
+      end
+    elif self.mmu_kind == "afc"
+      var a = values.find("AFC")
+      if !isinstance(a, map) return end
+      var current = a.find("current_lane")
+      self.lane_tool = -1
+      self.lane_mat = []
+      self.lane_col = []
+      for lane : self.afc_lanes
+        var d = values.find(lane)
+        if isinstance(d, map)
+          # 'map' is the tool a lane serves, e.g. "T2".
+          var tm = re.search("^T([0-9]+)$", str(d.find("map")))
+          if tm != nil
+            var ti = int(tm[1])
+            while size(self.lane_mat) <= ti
+              self.lane_mat.push("")
+              self.lane_col.push("")
+            end
+            self.lane_mat[ti] = str(d.find("material"))
+            self.lane_col[ti] = str(d.find("color"))
+            if type(current) == "string" && lane == "AFC_lane " + current self.lane_tool = ti end
+          end
+        end
+      end
+    end
+  end
+
+  # Happy Hare colours are "ff0000", "#ff0000" or a name; keep hex only.
+  def mmu_color(v)
+    if type(v) != "string" return "" end
+    if re.search("^#?[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]", v) != nil
+      return string.startswith(v, "#") ? v : "#" + v
+    end
+    return ""
+  end
+
+  # --- Labels for the heads page, idle screen and link-lost screen -------
+  # Built once a second in loop(), so draw() only paints ready strings.
+  def refresh_extra_labels()
+    var n = size(self.head_temp)
+    var compact = n > 4
+    self.head_text = []
+    self.head_label = []
+    self.head_color = []
+    var i = 0
+    while i < n
+      var t = self.head_temp[i]
+      var txt = t < 0 ? "--" : str(int(t + 0.5))
+      self.head_text.push(txt)
+      var name = self.tool_numbering == "head" ? "H" + str(i + 1) : "T" + str(i)
+      self.head_label.push(name + " " + txt)
+      var c = self.color_for_tool(i)
+      self.head_color.push(c >= 0 ? self.led_color(c) : (compact ? 0xC8B49A : 0x3C4650))
+      i += 1
+    end
+    # Idle screen: state word and colour, temperatures, last job.
+    var gone = self.last_ok == 0 || now_ms() - self.last_ok > max(60000, self.idle_poll * 3000)
+    var bt = self.bed_temp != nil ? self.bed_temp : 0
+    var tt = self.tool_temp != nil ? self.tool_temp : 0
+    var heating = (self.bed_target != nil && self.bed_target > 0) || (self.tool_target != nil && self.tool_target > 0)
+    if self.last_ok == 0 && self.link_reason == ""
+      # Not answered yet since the app (re)started.
+      self.idle_status = "LINKING"
+      self.idle_color = 0x6A7682
+    elif gone
+      self.idle_status = "OFFLINE"
+      self.idle_color = 0x6A7682
+    elif self.state == "error"
+      self.idle_status = "ERROR"
+      self.idle_color = 0xFF5555
+    elif heating
+      self.idle_status = "HEATING"
+      self.idle_color = 0xFFA040
+    elif bt > 40 || tt > 50
+      self.idle_status = "COOLING"
+      self.idle_color = 0x66C8FF
+    else
+      self.idle_status = "READY"
+      self.idle_color = 0x44EE99
+    end
+    self.idle_temps = gone ? "--" : format("B%d T%d", int(bt + 0.5), int(tt + 0.5))
+    self.idle_last = ""
+    if self.finish_kind == "complete"
+      # "LAST 1h56m" fits the full width; beside the drawing use "OK 1h56m".
+      self.idle_last = "LAST " + self.done_line
+      if self.style != "minimal" && text_ink_width(self.idle_last) > width() - 18
+        self.idle_last = "OK " + self.done_line
+      end
+    elif self.finish_kind == "error"
+      self.idle_last = "LAST FAILED"
+    end
+    # Link lost: how long ago, and where the print was.
+    if self.offline
+      var mins = int((now_ms() - self.last_ok) / 60000)
+      self.link_line1 = mins < 1 ? "<1m ago" : (mins < 60 ? str(mins) + "m ago" : str(mins / 60) + "h ago")
+      self.link_line2 = self.layer_short + " " + format("%d%%", self.pct)
+    end
+  end
+
+  # --- All heads ------------------------------------------------------------
+  # Up to four heads: "T0 215" in a 2x2 grid. Five to eight: four slots per
+  # row with the number only. Nine or more: two halves, alternating. Each
+  # slot has a bar in its filament colour (taller for the active head);
+  # heating heads are orange, the active head white, cold heads dim.
+  def draw_heads_page(oy)
+    var n = size(self.head_text)
+    if n == 0
+      text(0, 6 + oy, "HEADS --", 0x66C8FF)
+      return
+    end
+    var compact = n > 4
+    var per_row = compact ? 4 : 2
+    var pitch = compact ? 13 : 26
+    var first = 0
+    if n > 8 && int(now_ms() / 1500) % 2 == 1 first = 8 end
+    var active = self.tool_index()
+    var i = 0
+    while i < per_row * 2 && first + i < n
+      var h = first + i
+      var x = (i % per_row) * pitch
+      var base = i < per_row ? 6 : 14
+      var t = self.head_temp[h]
+      var g = self.head_target[h]
+      var ink = 0x4C5862
+      if g > 0 && g - t > 4
+        ink = 0xFFA040
+      elif h == active
+        ink = 0xFFFFFF
+      elif t >= 50 || g > 0
+        ink = 0xC8B49A
+      end
+      if compact
+        # No room for a bar: the number itself takes the filament colour,
+        # dimmed when cold; active head white, heating orange as above.
+        var c = self.head_color[h]
+        # Black filament's charcoal is fine for a swatch, too dark for digits.
+        if c == 0x3C4650 c = 0x8E9AA6 end
+        if ink == 0x4C5862 c = self.shade(c, 40) end
+        if h == active || ink == 0xFFA040 c = ink end
+        text(x + 1, oy + base, self.head_text[h], c)
+      else
+        if h == active
+          rect_fill(x, oy + base - 6, 1, 7, self.head_color[h])
+        else
+          rect_fill(x, oy + base - 5, 1, 5, self.head_color[h])
+        end
+        text(x + 2, oy + base, self.head_label[h], ink)
+      end
+      i += 1
+    end
+  end
+
+  # --- Link lost ------------------------------------------------------------
+  def showing_link_lost()
+    if !self.offline || !self.alert_offline return false end
+    if self.demo return true end
+    return now_ms() - self.last_ok < self.link_lost_minutes * 60000
+  end
+
+  # Two chain links pulled apart with a spark between them; the lower line
+  # alternates between how long ago and where the print was.
+  def draw_link_lost()
+    var t = now_ms()
+    var lively = self.style != "minimal"
+    var spark = lively && int(t / 400) % 2 == 0
+    rect(0, 4, 6, 7, 0x8A9BAC)
+    rect(1, 5, 4, 5, 0x3C4650)
+    rect(9, 4, 6, 7, 0x8A9BAC)
+    rect(10, 5, 4, 5, 0x3C4650)
+    var s = spark ? 0xFFD07A : 0xFF6544
+    pixel(7, 3, s)
+    pixel(7, 5, s)
+    pixel(7, 7, 0xFFFFFF)
+    pixel(7, 9, s)
+    pixel(7, 11, s)
+    text(17, 6, "OFFLINE", 0xFF6544)
+    var line = self.link_line1
+    if int(t / 2500) % 2 == 1 && self.link_line2 != "" line = self.link_line2 end
+    text(17, 14, line, 0xFFBB77)
+  end
+
+  # --- Idle -------------------------------------------------------------------
+  # The printer at rest: empty plate, carriage parked, status light breathing
+  # in the state colour. The lower line alternates temperatures and the last
+  # job's result.
+  def draw_idle()
+    var t = now_ms()
+    var x = 0
+    if self.style != "minimal"
+      x = 18
+      rect_fill(1, 0, 14, 1, 0x9AB4C7)
+      rect_fill(1, 1, 1, 12, 0x70899E)
+      rect_fill(14, 1, 1, 12, 0x70899E)
+      rect_fill(2, 1, 12, 1, 0x24394B)
+      rect_fill(2, 3, 12, 1, 0x526F84)
+      rect_fill(2, 12, 12, 1, 0xB4C8D3)
+      rect_fill(2, 13, 12, 1, 0x395161)
+      rect_fill(1, 14, 14, 1, 0x70899D)
+      rect_fill(2, 4, 3, 2, 0x90AABF)
+      pixel(3, 6, 0xA48B65)
+      var glow = 55 + int(45 * math.sin(t / 900.0))
+      pixel(13, 1, self.shade(self.idle_color, glow))
+    end
+    text(x, 6, self.idle_status, self.idle_color)
+    var line = self.idle_temps
+    if self.idle_last != "" && int(t / 3000) % 2 == 1 line = self.idle_last end
+    text(x, 14, line, 0xD9E4EC)
+  end
+
   # Self-contained caution graphic. The fill is deliberately darker than
   # the red 2-pixel border so the white mark reads clearly on an LED matrix.
   # Only Expressive animates; Minimal and Standard stay clean and static.
@@ -2561,7 +2961,8 @@ class KlipperDashboard
   # One page at a time. The offset enables BeautifulWeather-style
   # vertical slides without using an image buffer or additional network calls.
   def draw_print_page(idx, oy, ink)
-    if idx == 0
+    var id = self.pages[idx]
+    if id == 0
       # The layer and percentage fit on the same 52-pixel row.
       var left = self.layer_label
       if text_ink_width(left) + text_ink_width(self.pct_label) + 3 > width()
@@ -2587,13 +2988,15 @@ class KlipperDashboard
       end
       text(0, 14 + oy, bottom, self.state == "paused" ? 0xFFB000 : 0xFFC050)
       if right != "" text(width() - text_ink_width(right), 14 + oy, right, self.active_color >= 0 ? self.active_color : 0x66CCFF) end
-    elif idx == 1
+    elif id == 1
       text(0, 6 + oy, self.tool_label, 0xFF9060)
       var bx = width() - text_ink_width(self.bed_label)
       if bx < text_width(self.tool_label) + 2 bx = text_width(self.tool_label) + 2 end
       if bx < width() text(bx, 6 + oy, self.bed_label, 0x66C8FF) end
       text(0, 14 + oy, self.finish_label, 0xFFC050)
-    elif idx == 2
+    elif id == 2
+      self.draw_heads_page(oy)
+    elif id == 3
       # scroll_text centres text that fits, while a sliding page uses text():
       # only scroll a name that is too wide, so it never jumps after a slide.
       if oy == 0 && text_ink_width(self.file_label) > width()
@@ -2602,7 +3005,7 @@ class KlipperDashboard
         text(0, 6 + oy, self.file_label, 0x44CCFF)
       end
       text(0, 14 + oy, self.eta_label, 0xFFC050)
-    elif idx == 3 && self.show_material
+    elif id == 4
       # A swatch of the active filament's colour, when the job says it.
       var mx = 0
       if self.active_color >= 0
@@ -2630,13 +3033,17 @@ class KlipperDashboard
   def draw()
     clear()
     font("small")
-    if self.offline && self.alert_offline && !self.demo
-      text(0, 6, "LINK LOST", 0xFF6544)
-      text(0, 14, "CHECK PRINTER", 0xFFBB77)
+    if self.showing_link_lost()
+      self.draw_link_lost()
       return
     end
     if self.showing_done()
       self.draw_done()
+      return
+    end
+    # Between prints (or when the printer has been gone a long time).
+    if self.state != "printing" && self.state != "paused" || self.offline
+      self.draw_idle()
       return
     end
     if self.is_preparing()

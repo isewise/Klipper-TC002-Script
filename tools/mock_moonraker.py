@@ -18,6 +18,9 @@ Printer profiles (--profile):
   mmu          one extruder fed by a Happy Hare style MMU (8 gates): tool
                changes happen in the 'mmu' object while toolhead.extruder
                stays 'extruder' (field names approximate Happy Hare; verify)
+  afc          one extruder fed by an AFC unit (Box Turtle style, 4 lanes):
+               'AFC' current_lane plus one 'AFC_lane laneN' per lane with
+               map/material/color (field names approximate AFC; verify)
 
 Variations (combine with any profile):
   --tools N          heads (1-16); --gates N for the mmu profile
@@ -71,7 +74,8 @@ PROFILES = {
     "voron": {"tools": 1, "probe": "scanning", "level": "qgl", "m117": False},
     "ztilt": {"tools": 1, "probe": "classic", "level": "ztilt", "m117": False},
     "idex": {"tools": 2, "probe": "classic", "level": None, "m117": True, "idex": True},
-    "mmu": {"tools": 1, "gates": 8, "probe": "classic", "level": None, "m117": True},
+    "mmu": {"tools": 1, "gates": 8, "probe": "classic", "level": None, "m117": True, "unit": "hh"},
+    "afc": {"tools": 1, "gates": 4, "probe": "classic", "level": None, "m117": True, "unit": "afc"},
 }
 MAX_TOOLS = 16
 # Repeating per-tool material/colour/subtype plans; index i belongs to tool i.
@@ -391,8 +395,10 @@ class Sim:
             objs.append(LEVEL_OBJECT[self.p["level"]])
         if self.p.get("idex"):
             objs.append("dual_carriage")
-        if self.p.get("gates"):
+        if self.p.get("unit") == "hh":
             objs.append("mmu")
+        elif self.p.get("unit") == "afc":
+            objs += ["AFC", "AFC_unit Turtle_1"] + ["AFC_lane lane%d" % (i + 1) for i in range(self.slots())]
         for i in range(self.p["tools"]):
             objs.append(extruder_name(i))
             objs.append("filament_switch_sensor " + self.sensor_name(i))
@@ -447,7 +453,16 @@ class Sim:
         if self.p.get("idex"):
             st["dual_carriage"] = {"carriage_0": "PRIMARY" if active == 0 else "INACTIVE",
                                    "carriage_1": "PRIMARY" if active == 1 else "INACTIVE"}
-        if self.p.get("gates"):
+        if self.p.get("unit") == "afc":
+            changing = time.monotonic() < self.changing_until
+            st["AFC"] = {"current_lane": None if idle else "lane%d" % (self.tool + 1),
+                         "current_state": "Tool Loading" if changing and not idle else "Idle",
+                         "lanes": ["lane%d" % (i + 1) for i in range(self.slots())]}
+            for i in range(self.slots()):
+                st["AFC_lane lane%d" % (i + 1)] = {
+                    "name": "lane%d" % (i + 1), "map": "T%d" % i, "material": self.p["materials"][i],
+                    "color": self.p["colors"][i], "status": "Tool Loaded" if i == self.tool and not idle else "Ready"}
+        if self.p.get("unit") == "hh":
             g = self.p["gates"]
             changing = time.monotonic() < self.changing_until
             st["mmu"] = {
