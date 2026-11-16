@@ -119,3 +119,8 @@ python3 tools/record_moonraker.py --printer 192.168.1.50 --out my_printer.jsonl
 
 `tools/mock_moonraker.py` simulates printers for testing (`--help` lists the
 profiles), and `tools/replay_moonraker.py` plays a recording back.
+
+## License
+
+MIT – see [LICENSE](LICENSE). Use, change and share it freely; keep the
+copyright notice.

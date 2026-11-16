@@ -1,7 +1,7 @@
 # @name     Klipper Dashboard
 # @desc     Klipper printer status, multi-head materials, adaptive ETA and self-drawn status art
 # @author   isewise
-# @version  0.7.0
+# @version  1.0.0
 # @display  52x16
 # @config   host      text   "Moonraker IP or hostname" default="" group="Connection" help="Printer address without http://, e.g. 192.168.1.50 or voron.local."
 # @config   port      number "Moonraker port" default=7125 min=1 max=65535 group="Connection" help="7125 for Moonraker. 80 also works when Mainsail or Fluidd serves the printer."
@@ -26,6 +26,9 @@
 # @config   debug     bool   "Debug logging" default=false group="Advanced" help="Write [KD] lines about ETA, tools and sounds to the Log tab. Turn off after testing."
 # @config   demo      bool   "Preview without printing" default=false group="Advanced"
 # @config   demo_state select "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone,idle,offline group="Advanced" help="Shown while Preview is on. Press select to test that state's alert."
+
+# Copyright (c) 2026 isewise. MIT License: free to use, change and share;
+# keep this notice. Full text: LICENSE in the project's GitHub repository.
 
 # ======================================================================
 #  BEFORE YOU EDIT THIS SCRIPT
