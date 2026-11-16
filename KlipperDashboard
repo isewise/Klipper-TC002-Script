@@ -53,7 +53,7 @@ class KlipperDashboard
   var show_prep, console_stages, tool_target, bed_target
   var phase_name, phase_detail, phase_time, phase_ttl, phase_label, phase_sub
   var console_busy, console_time, stage_tick, m117, m117_last
-  var probe_x, probe_y, probe_time
+  var probe_time
   var notify_pause, sound_pause, notify_first, notify_half, notify_ninety, sound_milestone
   var show_material, notify_tool, alert_offline, notify_offline
   var show_active_tool, tool_numbering, demo_tool, debug_tool, tool_seen, tool_logged, active_tool_label
@@ -74,7 +74,7 @@ class KlipperDashboard
   var eta_debug_tick
   var style, prev_page, transition_started, transition_time
   var extrude_x, extrude_y, thermo_pixels, warning_pixels
-  var mesh_cells, mesh_points, mesh_last, probe_count, bed_lo_x, bed_hi_x, bed_lo_y, bed_hi_y
+  var mesh_px, mesh_py, mesh_pt, plan_x, plan_y, bed_lo_x, bed_hi_x, bed_lo_y, bed_hi_y
   var slot_colors, meta_colors, active_color, band_colors
   var finish_kind, finished_at, done_line, done_line2, done_minutes, alert_effects
   var check_x, check_y, done_palette
@@ -193,8 +193,6 @@ class KlipperDashboard
     self.console_busy = false
     self.console_time = 0
     self.stage_tick = 0
-    self.probe_x = nil
-    self.probe_y = nil
     self.probe_time = 0
     self.m117 = ""
     self.m117_last = ""
@@ -275,10 +273,8 @@ class KlipperDashboard
     self.offline = false
     self.layer_short = "L--"
     self.eta_short = ""
-    # Live bed-mesh drawing: a 13x13 miniature bed, one cell per pixel,
-    # holding the time each cell was probed (0 = not yet).
-    self.mesh_cells = []
-    while size(self.mesh_cells) < 169 self.mesh_cells.push(0) end
+    # Live bed-mesh drawing: probed points (mm, with the time each was
+    # probed) and the mesh plan the printer announced, if any.
     self.reset_mesh()
     self.bed_lo_x = 0.0
     self.bed_hi_x = 0.0
@@ -538,8 +534,6 @@ class KlipperDashboard
       self.phase_time = 0
       self.console_time = 0
       self.stage_tick = 0
-      self.probe_x = nil
-      self.probe_y = nil
       self.probe_time = 0
       self.m117 = ""
       self.m117_last = ""
@@ -1045,58 +1039,101 @@ class KlipperDashboard
   # actual operation; use them to refresh the stage. If BED_LEVELING was
   # missed, movement across DIFFERENT XY points also identifies a mesh,
   # whereas repeated probes at one XY are usually Z homing.
-  def note_probe(msg)
-    var m = re.search("probe at *([-0-9.]+), *([-0-9.]+)", msg)
+  def note_probe(msg, stamp)
+    # Stock Klipper: "probe at 83.085,109.049"; U1: "probe at x: 83.085, y: 109.049".
+    var m = re.search("probe at *[xX]?:? *([-0-9.]+), *[yY]?:? *([-0-9.]+)", msg)
     if m == nil return false end
     var x = num(m[1])
     var y = num(m[2])
     if x == nil || y == nil return true end
     var now = now_ms()
-    self.probe_count += 1
-    # Place the point on the 13x13 miniature bed (front of the bed at the
-    # bottom), once the bed size is known from the toolhead limits.
-    var wx = self.bed_hi_x - self.bed_lo_x
-    var wy = self.bed_hi_y - self.bed_lo_y
-    if wx > 10 && wy > 10
-      var cx = int(clamp((x - self.bed_lo_x) / wx, 0.0, 1.0) * 12 + 0.5)
-      var cy = 12 - int(clamp((y - self.bed_lo_y) / wy, 0.0, 1.0) * 12 + 0.5)
-      var cell = cy * 13 + cx
-      if self.mesh_cells[cell] == 0 self.mesh_points += 1 end
-      self.mesh_cells[cell] = now
-      self.mesh_last = cell
+    # More than 10 s since the previous probe (console time) starts a new
+    # probing step, so the map only shows the step in progress.
+    if self.probe_time > 0 && stamp - self.probe_time > 10000 && self.phase_name != "BED MESH"
+      self.clear_probes()
     end
+    # Remember each probed spot once: printers often sample one spot two or
+    # three times in a row, which only refreshes its flash.
+    var n = size(self.mesh_px)
+    if n > 0 && math.abs(x - self.mesh_px[n - 1]) <= 1 && math.abs(y - self.mesh_py[n - 1]) <= 1
+      self.mesh_pt[n - 1] = now
+    else
+      if n >= 64
+        self.mesh_px.remove(0)
+        self.mesh_py.remove(0)
+        self.mesh_pt.remove(0)
+      end
+      self.mesh_px.push(x)
+      self.mesh_py.push(y)
+      self.mesh_pt.push(now)
+    end
+    # Without an explicit stage, three or more different spots probed in
+    # one step means a mesh (or gantry levelling). One or two spots are Z
+    # homing, plate detection or nozzle wiping.
     var meshing = self.phase_name == "BED MESH"
-    if !meshing && self.probe_x != nil && self.probe_y != nil && now - self.probe_time < 180000
-      meshing = x - self.probe_x > 1 || self.probe_x - x > 1 || y - self.probe_y > 1 || self.probe_y - y > 1
+    var explicit = self.phase_time > 0 && now - self.phase_time <= self.phase_ttl
+    if !meshing && !explicit && size(self.mesh_px) >= 3
+      meshing = true
     end
     if meshing
-      self.set_stage("BED MESH", format("%d points", self.probe_count), 240)
+      var count = size(self.mesh_px)
+      var plan = size(self.plan_x)
+      var detail = plan > 0 ? format("%d/%d points", min(count, plan), plan) : format("%d points", count)
+      self.set_stage("BED MESH", detail, 240)
     end
-    self.probe_x = x
-    self.probe_y = y
-    self.probe_time = now
+    self.probe_time = stamp
     return true
   end
 
-  def stage_from_console(msg)
-    if re.search("PRINT_SWITCH_CHECKING", msg) != nil
-      self.set_stage("CHECK TOOLS", "Checking tools", 45)
-    elif re.search("PRINT_AUTO_FEEDING|PRINT_REPLENISHING", msg) != nil
-      self.set_stage("LOAD FILAMENT", "Loading filament", 140)
-    elif re.search("PRINT_BED_DETECTING", msg) != nil
-      self.set_stage("BED CHECK", "Inspecting bed", 100)
-    elif re.search("DETECT_PLATE", msg) != nil
-      self.set_stage("BED CHECK", "Detecting plate", 90)
-    elif re.search("BED_PREHEATING", msg) != nil
-      self.set_stage("HEAT SOAK", "Soaking bed", 240)
-    elif re.search("BED_PRESCANNING", msg) != nil
-      self.set_stage("BED MESH", "Checking mesh", 120)
-    elif re.search("BED_LEVELING", msg) != nil
-      self.set_stage("BED MESH", "Bed leveling", 240)
-    elif re.search("PRINT_PREEXTRUDING", msg) != nil
-      self.set_stage("PRIMING", "Priming nozzle", 90)
-    elif re.search("PRINT_RESUMING", msg) != nil
-      self.set_stage("RESUMING", "Resuming print", 35)
+  # U1 firmware names each preparation step explicitly ("Set action code
+  # X", "Changed main state to PRINTING with action X") and ends it with
+  # action IDLE. Match only those phrases: other lines can contain the same
+  # words, e.g. 'Unknown command:"SET_PRINT_AUTO_BED_LEVELING"'.
+  def stage_from_console(msg, stamp)
+    var act = re.search("action code ([A-Z_]+)|with action ([A-Z_]+)", msg)
+    if act != nil
+      var code = act[1] != nil ? act[1] : act[2]
+      if code == "IDLE"
+        # Step finished: heaters / M117 describe the gap until the next one.
+        self.phase_name = "PREPARING"
+        self.phase_time = 0
+      elif code == "PRINT_SWITCH_CHECKING"
+        self.set_stage("CHECK TOOLS", "Checking tools", 45)
+      elif code == "PRINT_AUTO_FEEDING" || code == "PRINT_REPLENISHING"
+        self.set_stage("LOAD FILAMENT", "Loading filament", 140)
+      elif code == "PRINT_BED_DETECTING"
+        self.set_stage("BED CHECK", "Inspecting bed", 100)
+      elif code == "DETECT_PLATE"
+        self.set_stage("BED CHECK", "Detecting plate", 90)
+      elif code == "BED_PREHEATING"
+        self.set_stage("HEAT SOAK", "Soaking bed", 240)
+      elif code == "BED_PRESCANNING"
+        self.set_stage("BED MESH", "Checking bed", 120)
+      elif code == "BED_LEVELING"
+        self.clear_probes()
+        self.set_stage("BED MESH", "Bed leveling", 240)
+      elif code == "PRINT_PREEXTRUDING"
+        self.set_stage("PRIMING", "Priming nozzle", 90)
+      elif code == "PRINT_RESUMING"
+        self.set_stage("RESUMING", "Resuming print", 35)
+      end
+      return
+    end
+    # U1 heat soak counts down: "Bed preheating: 42s left".
+    var soak = re.search("[Pp]reheating: *([0-9]+)s left", msg)
+    if soak != nil
+      self.set_stage("HEAT SOAK", "Soak " + soak[1] + "s", 30)
+      return
+    end
+    if re.search("generated points", msg) != nil
+      self.reset_mesh()
+      self.note_mesh_plan(msg)
+      return
+    end
+    if self.note_mesh_plan(msg) return end
+    if re.search("[Mm]esh [Bb]ed [Ll]eveling [Cc]omplete", msg) != nil
+      self.phase_name = "PREPARING"
+      self.phase_time = 0
     elif re.search("trigger_mcu_pos", msg) != nil
       self.set_stage("HOMING", "Homing X/Y", 60)
     elif re.search("z offset:", msg) != nil
@@ -1108,7 +1145,7 @@ class KlipperDashboard
     elif re.search("measure k:", msg) != nil
       self.set_stage("FLOW CAL", "Calibrating flow", 65)
     else
-      self.note_probe(msg)
+      self.note_probe(msg, stamp)
     end
   end
 
@@ -1139,7 +1176,7 @@ class KlipperDashboard
         var stamp = int(m[1]) * 1000 + int(frac[0..2])
         var msg = item.find("message")
         if type(msg) == "string" && stamp > self.console_time && stamp >= cutoff
-          if item.find("type") == "response" self.stage_from_console(msg) end
+          if item.find("type") == "response" self.stage_from_console(msg, stamp) end
         end
         if stamp > newest newest = stamp end
       end
@@ -2211,50 +2248,96 @@ class KlipperDashboard
   end
 
   # --- Live bed mesh ----------------------------------------------------
+  # A new job or a new mesh plan clears everything.
   def reset_mesh()
-    var i = 0
-    while i < 169
-      self.mesh_cells[i] = 0
-      i += 1
-    end
-    self.mesh_points = 0
-    self.mesh_last = -1
-    self.probe_count = 0
+    self.plan_x = []
+    self.plan_y = []
+    self.clear_probes()
   end
 
-  # Each probe point lights up where the printer really probed it, with a
-  # bright flash that settles to teal; the latest point gets a crosshair.
-  # Scanning probes (Beacon, Cartographer, Eddy) report no points, so a
-  # sweep crosses the bed instead.
+  # Probes from other steps (Z homing, corner checks) are cleared when the
+  # real mesh begins, so only its points stay on the map.
+  def clear_probes()
+    self.mesh_px = []
+    self.mesh_py = []
+    self.mesh_pt = []
+  end
+
+  # Klipper lists a mesh's points before probing them ("generated points"
+  # table: index | tool-adjusted (x, y) | probe (x, y)). Keep the probe
+  # positions so the drawing can show the whole plan before it is probed.
+  def note_mesh_plan(msg)
+    var rows = re.matchall("[0-9]+ +\\| +\\([-0-9.]+, *[-0-9.]+\\) +\\| +\\([-0-9.]+, *[-0-9.]+\\)", msg)
+    for row : rows
+      var m = re.search("\\(([-0-9.]+), *([-0-9.]+)\\) *$", row)
+      if m != nil && size(self.plan_x) < 64
+        self.plan_x.push(num(m[1], 0.0))
+        self.plan_y.push(num(m[2], 0.0))
+      end
+    end
+    return size(rows) > 0
+  end
+
+  # Planned points glow dimly; each probed point flashes, then settles to
+  # teal; the latest one gets a crosshair. With a plan, the drawing fits the
+  # planned area (an adaptive mesh fills the picture); without one, the
+  # whole bed. Scanning probes report no points: a sweep crosses the bed.
   def draw_mesh_art(t, color)
     rect(0, 0, 15, 15, 0x1E3646)
     if self.demo
       var k = int(t / 260) % 30
       var d = 0
-      while d < 25 && d < k
-        pixel(1 + (d % 5) * 3, 1 + (d / 5) * 3, d == k - 1 ? 0xF9F8DD : 0x37D6B5)
+      while d < 25
+        pixel(1 + (d % 5) * 3, 1 + (d / 5) * 3, d >= k ? 0x173A36 : (d == k - 1 ? 0xF9F8DD : 0x37D6B5))
         d += 1
       end
       return
     end
-    if self.mesh_points == 0
+    var lox = self.bed_lo_x
+    var hix = self.bed_hi_x
+    var loy = self.bed_lo_y
+    var hiy = self.bed_hi_y
+    var np = size(self.plan_x)
+    var i = 0
+    if np > 1
+      lox = self.plan_x[0]
+      hix = lox
+      loy = self.plan_y[0]
+      hiy = loy
+      while i < np
+        lox = min(lox, self.plan_x[i])
+        hix = max(hix, self.plan_x[i])
+        loy = min(loy, self.plan_y[i])
+        hiy = max(hiy, self.plan_y[i])
+        i += 1
+      end
+    end
+    var n = size(self.mesh_px)
+    if hix - lox < 1 || hiy - loy < 1 || (n == 0 && np == 0)
       var y = 1 + (t % 1800) * 13 / 1800
       line(1, y, 13, y, color)
       if y > 1 line(1, y - 1, 13, y - 1, self.shade(color, 35)) end
       return
     end
-    var i = 0
-    while i < 169
-      var stamp = self.mesh_cells[i]
-      if stamp > 0
-        var age = t - stamp
-        pixel(1 + i % 13, 1 + i / 13, age < 700 ? 0xF9F8DD : (age < 2000 ? 0x9CF5DE : 0x37D6B5))
-      end
+    var sx = 12.0 / (hix - lox)
+    var sy = 12.0 / (hiy - loy)
+    i = 0
+    while i < np
+      pixel(1 + int(clamp((self.plan_x[i] - lox) * sx, 0.0, 12.0) + 0.5),
+            13 - int(clamp((self.plan_y[i] - loy) * sy, 0.0, 12.0) + 0.5), 0x173A36)
       i += 1
     end
-    if self.mesh_last >= 0 && int(t / 300) % 2 == 0
-      var px = 1 + self.mesh_last % 13
-      var py = 1 + self.mesh_last / 13
+    i = 0
+    var px = 0
+    var py = 0
+    while i < n
+      var age = t - self.mesh_pt[i]
+      px = 1 + int(clamp((self.mesh_px[i] - lox) * sx, 0.0, 12.0) + 0.5)
+      py = 13 - int(clamp((self.mesh_py[i] - loy) * sy, 0.0, 12.0) + 0.5)
+      pixel(px, py, age < 700 ? 0xF9F8DD : (age < 2000 ? 0x9CF5DE : 0x37D6B5))
+      i += 1
+    end
+    if n > 0 && int(t / 300) % 2 == 0
       pixel(px - 1, py, 0xFFD58B)
       pixel(px + 1, py, 0xFFD58B)
       pixel(px, py - 1, 0xFFD58B)
