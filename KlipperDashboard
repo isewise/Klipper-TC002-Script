@@ -1,15 +1,16 @@
 # @name     Klipper Dashboard
 # @desc     Klipper printer status, multi-head materials, adaptive ETA and self-drawn status art
-# @version  0.6.11
+# @author   isewise
+# @version  0.7.0
 # @display  52x16
 # @config   host    text    "Moonraker IP or hostname" default="" group="Connection" help="No http:// prefix. Set your printer's LAN address."
 # @config   port    number  "Moonraker port" default=7125 min=1 max=65535 group="Connection"
 # @config   poll    number  "Refresh interval" default=8 min=3 max=60 unit=s group="Connection"
 # @config   idle_poll number "Idle refresh interval" default=30 min=10 max=300 unit=s group="Connection" help="Used while no print is running or the printer is off, to keep the shared HTTP queue free."
-# @config   style select "Animation profile" default=standard options=minimal,standard,expressive group="Animations" help="Minimal: static bar; Standard: familiar gradient; Expressive: animated preparation and printer scene. Sounds are independent."
+# @config   style select "Animation profile" default=standard options=minimal,standard,expressive group="Animations" help="Minimal: static bar. Standard: gradient glow. Expressive: animated prep and printer scene."
 # @config   page_fx select "Printing page transitions" default=auto options=auto,off,slide group="Animations" help="Auto uses no transitions in Minimal, 450 ms vertical slides in Standard/Expressive."
 # @config   printer_scene bool "Animated printer page" default=true group="Animations" help="Expressive only: adds an original miniature printer and growing model scene."
-# @config   prep_sprites bool "Animated preparation icons" default=true group="Animations" help="Expressive only: thermometer, enclosed-printer homing motion, mesh grid, filament loading and live extrusion drawings."
+# @config   prep_sprites bool "Animated preparation icons" default=true group="Animations" help="Expressive only: drawings for heating, homing, bed mesh, filament loading and priming."
 # @config   demo    bool    "Preview without printing" default=false group="Display"
 # @config   accent  color   "Progress color" default=#33EE88 group="Display"
 # @config   turn    number  "Seconds per turn (manual/preparation)" default=8 min=4 max=30 unit=s group="Display" help="Used when page cycling is off, or while preparing/paused."
@@ -22,11 +23,11 @@
 # @config   glow_trail slider "Glow trail length" default=8 min=3 max=18 step=1 unit=px group="Display" help="3 gives a short sparkle; 18 creates a long, visible fade."
 # @config   glow_speed number "Glow speed" default=110 min=40 max=350 unit=ms group="Display" help="Milliseconds per pixel; smaller values move faster."
 # @config   show_prep bool "Show preparation stages" default=true group="Progress" help="During layer 0, show temperatures, homing, bed probing and startup messages instead of 0%."
-# @config   console_stages bool "Read console stage messages" default=true group="Progress" help="Use read-only Moonraker console history to detect printer actions. Snapmaker U1 supported; other printers use heater/M117 fallback."
+# @config   console_stages bool "Read console stage messages" default=true group="Progress" help="Read printer actions from the Moonraker console (Snapmaker U1). Others use heaters and M117."
 # @config   prelayer_zero bool "0% until first layer" default=true group="Progress" help="Show zero while Klipper reports layer 0; avoids counting the start G-code as printing."
 # @config   correction number "Percent correction" default=0 min=-10 max=10 unit=% group="Progress" help="Visual progress correction only. ETA always uses unmodified Moonraker file progress."
-# @config   eta_mode select "ETA calculation" default=adaptive options=adaptive,slicer group="ETA" help="Adaptive gently blends observed pace with slicer time; Slicer uses the original estimate. Both fall back when metadata is missing."
-# @config   eta_debug bool "Log ETA calculations" default=false group="ETA" help="Log ETA source, both estimates, and sample confidence about once per minute. Disable after testing."
+# @config   eta_mode select "ETA calculation" default=adaptive options=adaptive,slicer group="ETA" help="Adaptive blends observed pace into the slicer estimate. Slicer shows the estimate as is."
+# @config   eta_debug bool "Log ETA calculations" default=false group="ETA" help="Log ETA source, estimates and samples about once a minute. Turn off after testing."
 # @config   notify_done bool "Completion notification" default=false group="Alerts" help="Shows one alert after a live print finishes; initial completed state is ignored."
 # @config   sound_done bool  "Play completion melody" default=false group="Alerts" help="Only plays if completion notification is enabled. Off by default."
 # @config   notify_error bool "Failure notification" default=false group="Alerts" help="Alerts after a live print enters error state; cancelled prints are ignored."
@@ -79,14 +80,14 @@ class KlipperDashboard
   var notify_pause, sound_pause, notify_first, notify_half, notify_ninety, sound_milestone
   var heat_progress, show_material, notify_tool, alert_offline, notify_offline
   var show_active_tool, tool_numbering, demo_tool, debug_tool, tool_seen, tool_logged, active_tool_label
-  var prev_layer, prev_pct, prev_tool, first_alerted, half_alerted, ninety_alerted
-  var filament_used, filament_total, filament_weight_total, material, material_label, used_label, planned_label
+  var prev_layer, prev_pct, first_alerted, half_alerted, ninety_alerted
+  var filament_used, filament_total, filament_weight_total, material_label, used_label
   var meta_materials, meta_tools, slot_materials, slot_subtypes, slot_supported
-  var show_pips, filament_units, filament_dia, filament_density, filament_alt_grams, tool_count
-  var heat_bed_start, heat_bed_goal, heat_tool_start, heat_tool_goal, heat_pct
+  var show_pips, filament_units, filament_dia, filament_density, filament_alt_grams
+  var heat_bed_start, heat_bed_goal, heat_tool_start, heat_tool_goal
   var capabilities_loaded, capabilities_busy, capability_tick, sensor_list, extruders
   var query_url, idle_poll, gcode_start, gcode_end, sensor_prior, sensor_loss_time, pause_reason, stats_message
-  var offline_failures, offline, active_before_offline, last_state, paused_at
+  var offline_failures, offline, layer_short, eta_short
   var sound_error, done_audio, done_audio_value, pause_audio, pause_audio_value
   var runout_audio, runout_audio_value, milestone_audio, milestone_audio_value, error_audio, error_audio_value
   var debug_audio
@@ -242,15 +243,12 @@ class KlipperDashboard
     self.notify_offline = store.get("notify_offline", false)
     self.prev_layer = nil
     self.prev_pct = nil
-    self.prev_tool = nil
     self.first_alerted = false
     self.half_alerted = false
     self.ninety_alerted = false
     self.filament_used = nil
     self.filament_total = nil
     self.filament_weight_total = nil
-    self.tool_count = 0
-    self.material = ""
     self.meta_materials = []
     self.meta_tools = []
     self.slot_materials = []
@@ -258,12 +256,10 @@ class KlipperDashboard
     self.slot_supported = false
     self.material_label = "MATERIAL --"
     self.used_label = "USED --"
-    self.planned_label = ""
     self.heat_bed_start = nil
     self.heat_bed_goal = nil
     self.heat_tool_start = nil
     self.heat_tool_goal = nil
-    self.heat_pct = -1
     self.capabilities_loaded = false
     self.capabilities_busy = false
     self.capability_tick = 0
@@ -277,9 +273,8 @@ class KlipperDashboard
     self.stats_message = ""
     self.offline_failures = 0
     self.offline = false
-    self.active_before_offline = false
-    self.last_state = "standby"
-    self.paused_at = 0
+    self.layer_short = "L--"
+    self.eta_short = ""
     self.observed = false
     self.in_flight = false
     self.accent = store.get("accent", 0x33EE88)
@@ -325,7 +320,6 @@ class KlipperDashboard
       self.bed_temp = 60
       self.tool_target = 215
       self.bed_target = 60
-      self.material = "PLA"
       self.slot_materials = ["PETG", "PETG", "PLA", "TPU", "ABS", "ASA", "PLA", "PETG", "PLA-CF"]
       self.slot_subtypes = ["", "Support PETG", "", "", "", "", "", "Support", ""]
       # A 4-head preview printer, grown to include the chosen preview head.
@@ -336,7 +330,6 @@ class KlipperDashboard
       self.filament_used = 4790
       self.filament_total = 7500
       self.filament_weight_total = 22.4
-      self.tool_count = 4
       self.heat_bed_start = 20
       self.heat_bed_goal = 60
       self.heat_tool_start = 25
@@ -498,8 +491,6 @@ class KlipperDashboard
       self.filament_used = nil
       self.filament_total = nil
       self.filament_weight_total = nil
-      self.tool_count = 0
-      self.material = ""
       self.meta_materials = []
       self.meta_tools = []
       self.phase_name = "PREPARING"
@@ -533,7 +524,6 @@ class KlipperDashboard
     end
     # A pause must be witnessed. Never announce a pause on first connection.
     if self.observed && previous_state == "printing" && st == "paused" && was_active
-      self.paused_at = now_ms()
       self.pause_reason = self.infer_pause_reason(stats.find("message"))
       # Show the status page (PAUSED / reason) rather than freezing
       # whichever page was up when cycling stopped.
@@ -543,7 +533,6 @@ class KlipperDashboard
     end
     self.observed = true
     self.state = st
-    self.last_state = st
     self.last_ok = now_ms()
     if st != "printing" && st != "paused"
       self.prev_pct = nil
@@ -572,8 +561,6 @@ class KlipperDashboard
       self.reset_eta()
       self.filament_total = nil
       self.filament_weight_total = nil
-      self.tool_count = 0
-      self.material = ""
       self.meta_materials = []
       self.meta_tools = []
       self.get_metadata(file)
@@ -746,7 +733,6 @@ class KlipperDashboard
     self.offline_failures += 1
     if self.offline_failures >= 3 && !self.offline
       self.offline = true
-      self.active_before_offline = true
       if self.notify_offline
         notify({"text": "PRINTER OFFLINE", "textColor": 0xFF6544, "durationMs": 7000})
       end
@@ -983,9 +969,7 @@ class KlipperDashboard
     self.meta_materials = []
     if isinstance(n, list)
       self.meta_materials = n
-      self.material = ""
     elif type(n) == "string"
-      self.material = n
       # Some Moonraker slicers return a JSON-encoded list as a string.
       if string.startswith(n, "[")
         var parsed = self.safe_json(n)
@@ -999,7 +983,6 @@ class KlipperDashboard
     self.meta_tools = []
     if isinstance(n, list)
       self.meta_tools = n
-      self.tool_count = size(n)
     end
     self.update_eta()
     self.refresh_labels()
@@ -1799,7 +1782,8 @@ class KlipperDashboard
 
     if self.eta_debug && now_ms() - self.eta_debug_tick >= 60000
       self.eta_debug_tick = now_ms()
-      log(format("[KD ETA] mode=%s source=%s p=%d%% work=%ds slicer=%ds adaptive=%ds shown=%ds samples=%d prep_offset=%s",
+      # Short keys: device log lines are cut at 120 characters.
+      log(format("[KD ETA] %s/%s p=%d%% w=%d sl=%d ad=%d show=%d n=%d prep=%s",
             self.eta_mode, self.eta_source, int(pct * 100), int(work),
             int(self.eta_slicer_remaining), int(self.eta_adaptive_remaining),
             int(self.eta_smoothed), self.eta_rate_samples, str(self.eta_start_seen)))
@@ -1956,9 +1940,11 @@ class KlipperDashboard
     end
     self.pct_label = format("%d%%", self.pct)
     self.eta_label = self.eta_text()
+    # Compact forms for the main page, built here so draw() never allocates.
+    self.layer_short = self.layer != nil ? format("L%d", int(self.layer)) : "L--"
+    self.eta_short = string.replace(self.eta_label, "ETA ", "")
     self.finish_label = self.finish_text()
 
-    var tool_no = str(self.tool_index())
     self.active_tool_label = ""
     # The badge only helps when there is more than one head to tell apart.
     if self.tool_seen && (size(self.extruders) > 1 || self.tool != "extruder")
@@ -2162,11 +2148,7 @@ class KlipperDashboard
       # The layer and percentage fit on the same 52-pixel row.
       var left = self.layer_label
       if text_ink_width(left) + text_ink_width(self.pct_label) + 3 > width()
-        if self.layer != nil
-          left = format("L%d", int(self.layer))
-        else
-          left = "L--"
-        end
+        left = self.layer_short
       end
       text(0, 6 + oy, left, 0x44CCFF)
       text(width() - text_ink_width(self.pct_label), 6 + oy, self.pct_label, ink)
@@ -2178,7 +2160,7 @@ class KlipperDashboard
         # Try compact ETA first if the tool would collide with its text.
         # Suppress the tool badge if the ETA/pause message still doesn't fit.
         if text_ink_width(bottom) + text_ink_width(right) + 2 > width()
-          var shorter = string.replace(bottom, "ETA ", "")
+          var shorter = bottom == self.eta_label ? self.eta_short : bottom
           if text_ink_width(shorter) + text_ink_width(right) + 2 <= width()
             bottom = shorter
           else
