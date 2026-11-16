@@ -25,6 +25,7 @@ Variations (combine with any profile):
   --no-m117          start G-code that prints no M117 stage messages
   --probe P          classic (prints each probe point) or scanning (silent)
   --auth KEY         require X-Api-Key: KEY, otherwise answer 401
+  --no-m73           slicer without M73 time-based progress
 
 Endpoints served (the ones the script uses):
   GET /printer/objects/list
@@ -373,6 +374,15 @@ class Sim:
             return 50.0 * f
         return 0.0
 
+    def display_progress(self, pos):
+        if not self.a.m73:
+            return round(pos / FILE_SIZE, 3)
+        if self.phase == "complete":
+            return 1.0
+        if self.prep_t < self.prep_total:
+            return 0.0
+        return int(self.frac() * 100) / 100.0
+
     def objects(self):
         objs = ["webhooks", "configfile", "mcu", "gcode_move", "print_stats", "virtual_sdcard",
                 "pause_resume", "display_status", "heater_bed", "toolhead", "idle_timeout", "bed_mesh"]
@@ -425,7 +435,9 @@ class Sim:
                 "square_corner_velocity": 5.0,
             },
             "heater_bed": {"temperature": round(bed[0], 2), "target": bed[1], "power": 0.4 if bed[1] else 0.0},
-            "display_status": {"progress": round(pos / FILE_SIZE, 3), "message": self.display},
+            # With M73 (Orca's default) Klipper reports the slicer's time-based
+            # percentage, in whole percent; without it, the file progress.
+            "display_status": {"progress": self.display_progress(pos), "message": self.display},
             "pause_resume": {"is_paused": self.phase == "paused"},
             "bed_mesh": {"profile_name": "default" if self.stage_done("mesh") else "",
                          "mesh_min": [20.0, 20.0], "mesh_max": [220.0, 220.0]},
@@ -485,6 +497,8 @@ class Sim:
             "filament_name": ";".join("Generic " + m for m in self.p["materials"]),
             "filament_colors": list(self.p["colors"]),
             "referenced_tools": list(range(n)) if n > 1 else [],
+            "layer_count": self.a.layers,
+            "filament_weights": [round((self.a.filament_mm + 50) * 0.00298 / n, 2)] * n,
             "gcode_start_byte": START_BYTE, "gcode_end_byte": END_BYTE,
             "thumbnails": [],
         }}
@@ -591,6 +605,8 @@ def main():
     ap.add_argument("--no-layer-info", action="store_true", help="no SET_PRINT_STATS_INFO layer data")
     ap.add_argument("--no-m117", action="store_true", help="no M117 stage messages")
     ap.add_argument("--auth", metavar="KEY", help="require this X-Api-Key, else answer 401")
+    ap.add_argument("--no-m73", dest="m73", action="store_false",
+                    help="slicer without M73 progress (display progress = file progress)")
     ap.add_argument("--scenario", default="full",
                     choices=["full", "runout", "pause", "error", "cancel", "attach", "offline"])
     ap.add_argument("--event-at", type=float, default=0.35, help="print fraction where the scenario event fires")

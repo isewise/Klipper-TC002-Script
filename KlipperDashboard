@@ -78,6 +78,8 @@ class KlipperDashboard
   var slot_colors, meta_colors, active_color, band_colors
   var finish_kind, finished_at, done_line, done_line2, done_minutes, alert_effects
   var check_x, check_y, done_palette
+  var m73_seen, m73_fraction, m73_change_work, homed_axes, homing_sub, homing_at
+  var level_pending, level_name, meta_layers, meta_weights
 
   def init()
     # ------------------------------------------------------------------
@@ -295,6 +297,18 @@ class KlipperDashboard
     self.check_x = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     self.check_y = [7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 3]
     self.done_palette = [0x1E9E6A, 0x44EE99, 0xD9FFE8, 0x44EE99, 0x1E9E6A]
+    # Slicer time-based progress (M73), homing and gantry levelling state,
+    # and slicer layer count / per-tool grams.
+    self.m73_seen = false
+    self.m73_fraction = 0.0
+    self.m73_change_work = 0.0
+    self.homed_axes = "xyz"
+    self.homing_sub = "Homing axes"
+    self.homing_at = 0
+    self.level_pending = false
+    self.level_name = ""
+    self.meta_layers = 0
+    self.meta_weights = []
     self.observed = false
     self.in_flight = false
     self.accent = store.get("accent", 0x33EE88)
@@ -429,9 +443,10 @@ class KlipperDashboard
   # empty map, so optional heaters, sensors and U1 slot data are safe to ask
   # for. Field filters keep the response small. Rebuilt when capabilities load.
   def build_query()
-    var q = self.base + "/printer/objects/query?print_stats=state,filename,print_duration,filament_used,message,info"
-    q += "&virtual_sdcard=progress,file_position&display_status=message"
-    q += "&toolhead=extruder,axis_minimum,axis_maximum"
+    var q = self.base + "/printer/objects/query?print_stats=state,filename,print_duration,total_duration,filament_used,message,info"
+    q += "&virtual_sdcard=progress,file_position&display_status=message,progress"
+    q += "&toolhead=extruder,homed_axes,axis_minimum,axis_maximum"
+    q += "&quad_gantry_level=applied&z_tilt=applied"
     q += "&heater_bed=temperature,target"
     if size(self.extruders) == 0
       q += "&extruder=temperature,target"
@@ -532,7 +547,15 @@ class KlipperDashboard
       self.phase_name = "PREPARING"
       self.phase_detail = "Starting print"
       self.phase_time = 0
+      # Ignore console lines from before this print (a manual homing or
+      # probe just before starting it): total_duration is the time since
+      # the print started. Console times are milliseconds since 1970.
       self.console_time = 0
+      var since = stats.find("total_duration")
+      var wall = epoch_ms()
+      if wall > 0 && since != nil
+        self.console_time = wall - int(num(since, 0) * 1000) - 2000
+      end
       self.stage_tick = 0
       self.probe_time = 0
       self.m117 = ""
@@ -558,6 +581,9 @@ class KlipperDashboard
       self.finish_kind = ""
       self.reset_mesh()
       self.band_colors = [-1, -1, -1, -1, -1]
+      self.m73_seen = false
+      self.m73_fraction = 0.0
+      self.m73_change_work = 0.0
     end
     # A pause must be witnessed. Never announce a pause on first connection.
     if self.observed && previous_state == "printing" && st == "paused" && was_active
@@ -620,11 +646,30 @@ class KlipperDashboard
       if self.gcode_end != nil && pos != nil
         p = real(int(pos) - self.gcode_start) / (self.gcode_end - self.gcode_start)
       end
+      # Orca, PrusaSlicer and Bambu-style slicers write M73 P lines computed
+      # from their time estimate; Klipper reports them as display_status
+      # progress. Without M73 that value simply equals the file progress, so
+      # any difference means M73 is present: time-based progress for the
+      # percentage and the ETA. The print time at each change gives pace.
+      var ds = values.find("display_status")
+      var shown = isinstance(ds, map) ? ds.find("progress") : nil
+      var raw = card.find("progress")
+      if shown != nil && raw != nil && st == "printing" && math.abs(num(shown) - num(raw)) > 0.002
+        self.m73_seen = true
+      end
+      if self.m73_seen && shown != nil
+        var f = max(0.0, min(1.0, num(shown)))
+        if f != self.m73_fraction
+          self.m73_fraction = f
+          self.m73_change_work = self.elapsed
+        end
+      end
       if p != nil
         self.eta_file_fraction = max(0.0, min(1.0, num(p)))
         # This is how much of the G-code FILE Klipper has read, not
         # necessarily how much physical printing has happened.
-        var raw_pct = int(max(0, min(100, self.eta_file_fraction * 100 + 0.5)))
+        var shown_fraction = self.m73_seen ? self.m73_fraction : self.eta_file_fraction
+        var raw_pct = int(max(0, min(100, shown_fraction * 100 + 0.5)))
         if raw_pct >= 100
           self.pct = 100
         else
@@ -656,10 +701,18 @@ class KlipperDashboard
     # When layer tracking is present and still at zero, the file
     # percentage includes slicer start G-code (heating, calibration, etc.).
     # Do not claim material has been printed just because bytes were read.
+    # The slicer's layer count fills in a missing total.
+    if self.layer != nil && self.total_layers == nil && self.meta_layers > 0
+      self.total_layers = self.meta_layers
+    end
     if self.prelayer_zero && self.layer != nil && self.total_layers != nil
       if num(self.total_layers) > 0 && num(self.layer) <= 0
         self.pct = 0
       end
+    end
+    # Without layer numbers, nothing is printed before the first extrusion.
+    if self.prelayer_zero && self.layer == nil && self.elapsed < 1
+      self.pct = 0
     end
 
     var head = values.find("toolhead")
@@ -677,6 +730,16 @@ class KlipperDashboard
           log("[KD TOOL] active=" + candidate + " display=" + self.compact_tool_name() + " state=" + st)
           self.tool_logged = true
         end
+      end
+      # G28 resets the homed axes and adds them one by one ('' -> y -> xy
+      # -> xyz). Only that counts as homing: the U1, for one, un-homes Z
+      # (xyz -> xy) for a while before probing, which is not homing.
+      var homed = head.find("homed_axes")
+      if type(homed) == "string" && homed != self.homed_axes
+        var adding = homed == "" || size(homed) > size(self.homed_axes)
+        self.homing_at = adding ? now_ms() : 0
+        self.homed_axes = homed
+        self.homing_sub = homed == "" ? "Homing axes" : "Homed " + string.toupper(homed)
       end
       # Bed size, to place probe points on the miniature bed drawing.
       var lo = head.find("axis_minimum")
@@ -746,6 +809,30 @@ class KlipperDashboard
           self.heat_bed_start = self.bed_temp
         end
       end
+    end
+
+    # Gantry levelling (Voron QGL, Z-tilt) not yet applied: probing now is
+    # levelling, not a mesh. When it completes, the mesh map starts fresh.
+    var lv = values.find("quad_gantry_level")
+    var lv_name = "Gantry"
+    if !isinstance(lv, map) || lv.find("applied") == nil
+      lv = values.find("z_tilt")
+      lv_name = "Z tilt"
+    end
+    if isinstance(lv, map) && lv.find("applied") != nil
+      var pending = lv.find("applied") == false
+      if self.level_pending && !pending
+        # Levelling just finished: its label and points must not linger.
+        self.clear_probes()
+        if self.phase_name == "LEVELING"
+          self.phase_name = "PREPARING"
+          self.phase_time = 0
+        end
+      end
+      self.level_pending = pending
+      self.level_name = lv_name
+    else
+      self.level_pending = false
     end
 
     # U1 and compatible firmware publish the material loaded in each head.
@@ -1005,6 +1092,10 @@ class KlipperDashboard
     elif type(n) == "string" && n != ""
       self.meta_colors = string.split(string.replace(n, ";", ","), ",")
     end
+    n = r.find("layer_count")
+    self.meta_layers = n != nil ? int(num(n, 0)) : 0
+    n = r.find("filament_weights")
+    self.meta_weights = isinstance(n, list) ? n : []
     n = r.find("referenced_tools")
     self.meta_tools = []
     if isinstance(n, list)
@@ -1021,7 +1112,10 @@ class KlipperDashboard
     if self.demo
       return self.demo_state != "printing" && self.demo_state != "paused" && self.demo_state != "filament_out" && self.demo_state != "complete" && self.demo_state != "error" && self.demo_state != "milestone"
     end
-    if self.layer == nil return false end
+    # Without layer numbers from the slicer, use Klipper itself: its
+    # print_duration stays at 0 until the first extrusion, so homing,
+    # heating, levelling and meshing all come before it on any printer.
+    if self.layer == nil return self.elapsed < 1 end
     # The timeout protects a printer whose slicer does not update CURRENT_LAYER.
     return num(self.layer) <= 0 && self.elapsed < 1800
   end
@@ -1070,12 +1164,15 @@ class KlipperDashboard
     # Without an explicit stage, three or more different spots probed in
     # one step means a mesh (or gantry levelling). One or two spots are Z
     # homing, plate detection or nozzle wiping.
-    var meshing = self.phase_name == "BED MESH"
+    var meshing = self.phase_name == "BED MESH" || self.phase_name == "LEVELING"
     var explicit = self.phase_time > 0 && now - self.phase_time <= self.phase_ttl
     if !meshing && !explicit && size(self.mesh_px) >= 3
       meshing = true
     end
-    if meshing
+    if meshing && self.level_pending
+      if self.phase_name != "LEVELING" self.set_stage("LEVELING", self.level_name, 120) end
+      self.phase_time = now
+    elif meshing
       var count = size(self.mesh_px)
       var plan = size(self.plan_x)
       var detail = plan > 0 ? format("%d/%d points", min(count, plan), plan) : format("%d points", count)
@@ -1131,6 +1228,12 @@ class KlipperDashboard
       return
     end
     if self.note_mesh_plan(msg) return end
+    # QGL / Z_TILT_ADJUST: "Retries: 1/5 Probed points range: 0.081250 ..."
+    var tries = re.search("Retries: *[0-9]+/[0-9]+ *Probed points range: *([0-9]+[.]?[0-9]?[0-9]?[0-9]?)", msg)
+    if tries != nil
+      self.set_stage("LEVELING", "Range " + tries[1] + "mm", 120)
+      return
+    end
     if re.search("[Mm]esh [Bb]ed [Ll]eveling [Cc]omplete", msg) != nil
       self.phase_name = "PREPARING"
       self.phase_time = 0
@@ -1227,6 +1330,12 @@ class KlipperDashboard
     if self.phase_time > 0 && now_ms() - self.phase_time <= self.phase_ttl
       self.phase_label = self.phase_name
       self.phase_sub = self.phase_detail
+      return
+    end
+    # Axes being added within the last 30 s: G28 is running, on any printer.
+    if self.homing_at > 0 && self.homed_axes != "xyz" && now_ms() - self.homing_at < 30000
+      self.phase_label = "HOMING"
+      self.phase_sub = self.homing_sub
       return
     end
     if self.bed_target != nil && self.bed_temp != nil
@@ -1670,7 +1779,7 @@ class KlipperDashboard
   def draw_preparation()
     self.update_stage_labels()
     var head_color = 0xFFC050
-    if self.phase_label == "HOMING" || self.phase_label == "PROBING Z" || self.phase_label == "BED MESH"
+    if self.phase_label == "HOMING" || self.phase_label == "PROBING Z" || self.phase_label == "BED MESH" || self.phase_label == "LEVELING"
       head_color = 0x54CFFF
     elif self.phase_label == "PRIMING" || self.phase_label == "FLOW CAL"
       head_color = 0x4BEEA0
@@ -1728,13 +1837,17 @@ class KlipperDashboard
   def update_eta()
     if self.demo return end
     if self.state != "printing" return end
-    if self.layer != nil && num(self.layer) <= 0
+    if (self.layer != nil && num(self.layer) <= 0) || (self.layer == nil && self.elapsed < 1)
       self.eta_source = "preparing"
       return
     end
     var work = max(0.0, self.elapsed)
     var pct = max(0.0, min(1.0, self.eta_file_fraction))
-    if self.eta_start_seen && self.eta_start_elapsed != nil
+    if self.m73_seen
+      # M73 is a fraction of the slicer's own time for the whole job, so
+      # no preparation offset applies.
+      pct = self.m73_fraction
+    elif self.eta_start_seen && self.eta_start_elapsed != nil
       work = max(0.0, self.elapsed - self.eta_start_elapsed)
       var usable = 1.0 - self.eta_start_progress
       if usable > 0.02
@@ -1754,7 +1867,14 @@ class KlipperDashboard
     # Mean observed print pace. G-code bytes aren't time-linear, especially
     # for dense infill, travel, tool changes or small top layers.
     var observed = -1
-    if pct >= 0.10 && pct < 0.995 && work >= 180
+    if self.m73_seen
+      # Pace measured when the M73 percentage last changed, so whole-percent
+      # steps do not make the estimate saw-tooth between them.
+      var at = self.m73_change_work
+      if pct >= 0.02 && pct < 0.995 && at >= 30
+        observed = max(0.0, at * (1.0 - pct) / pct - (work - at))
+      end
+    elif pct >= 0.10 && pct < 0.995 && work >= 180
       observed = work * (1.0 - pct) / pct
     end
 
@@ -1800,6 +1920,9 @@ class KlipperDashboard
         # up to 55%, never displacing geometry-aware slicer knowledge.
         var weight = min(0.55, max(0.0, (pct - 0.10) * 0.55 / 0.65))
         weight *= min(1.0, work / 480.0)
+        # Time-based M73 pace corrects a consistently optimistic or
+        # pessimistic slicer, so trust it almost fully after ~17%.
+        if self.m73_seen weight = min(0.95, max(0.0, (pct - 0.02) / 0.15)) end
         # Still recover when the slicer severely underestimates a job:
         # a depleted slicer countdown is not proof of completion.
         var upper = max(slicer * 2.00, self.total_est * 0.35, 90.0)
@@ -2034,6 +2157,15 @@ class KlipperDashboard
     self.material_label = display_tool + " MAT --"
     var kind = self.material_for_tool(self.tool_index())
     if kind != "" self.material_label = display_tool + " " + kind end
+    # The slicer's planned grams for this tool, when they fit beside it.
+    var ti = self.tool_index()
+    if ti >= 0 && ti < size(self.meta_weights)
+      var grams = num(self.meta_weights[ti], 0)
+      if grams > 0
+        var longer = self.material_label + format(" %.0fg", grams)
+        if text_ink_width(longer) <= width() - 5 self.material_label = longer end
+      end
+    end
     var col = self.color_for_tool(self.tool_index())
     self.active_color = col >= 0 ? self.led_color(col) : -1
     # Record which colour printed the current quarter of the job.
