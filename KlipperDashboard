@@ -3,64 +3,41 @@
 # @author   isewise
 # @version  0.7.0
 # @display  52x16
-# @config   host    text    "Moonraker IP or hostname" default="" group="Connection" help="No http:// prefix. Set your printer's LAN address."
-# @config   port    number  "Moonraker port" default=7125 min=1 max=65535 group="Connection"
-# @config   poll    number  "Refresh interval" default=8 min=3 max=60 unit=s group="Connection"
-# @config   idle_poll number "Idle refresh interval" default=30 min=10 max=300 unit=s group="Connection" help="Used while no print is running or the printer is off, to keep the shared HTTP queue free."
-# @config   style select "Animation profile" default=standard options=minimal,standard,expressive group="Animations" help="Minimal: static bar. Standard: gradient glow. Expressive: animated prep and printer scene."
-# @config   page_fx select "Printing page transitions" default=auto options=auto,off,slide group="Animations" help="Auto uses no transitions in Minimal, 450 ms vertical slides in Standard/Expressive."
-# @config   printer_scene bool "Animated printer page" default=true group="Animations" help="Expressive only: adds an original miniature printer and growing model scene."
-# @config   prep_sprites bool "Animated preparation icons" default=true group="Animations" help="Expressive only: drawings for heating, homing, bed mesh, filament loading and priming."
-# @config   demo    bool    "Preview without printing" default=false group="Display"
-# @config   accent  color   "Progress color" default=#33EE88 group="Display"
-# @config   turn    number  "Seconds per turn (manual/preparation)" default=8 min=4 max=30 unit=s group="Display" help="Used when page cycling is off, or while preparing/paused."
-# @config   auto_pages bool "Auto-cycle pages while printing" default=true group="Display" help="Show progress, temperatures, filename and optional material page automatically each app turn."
-# @config   page_secs number "Seconds per page" default=3 min=2 max=12 unit=s group="Display" help="Each enabled page is shown for this long; the app turn expands to fit one complete cycle."
-# @config   show_pips bool "Show page position dots" default=true group="Display" help="Small dots at upper right show the current page within the Klipper app's rotation."
-# @config   demo_state select  "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone group="Display" help="Only used when Preview without printing is on."
-# @config   bar     bool    "Show progress bar" default=true group="Display" help="Show print progress along the bottom row, including when animation is off."
-# @config   anim    bool    "Animated gradient glow" default=true group="Display" help="A smooth comet highlight on both printing and preparation screens."
-# @config   glow_trail slider "Glow trail length" default=8 min=3 max=18 step=1 unit=px group="Display" help="3 gives a short sparkle; 18 creates a long, visible fade."
-# @config   glow_speed number "Glow speed" default=110 min=40 max=350 unit=ms group="Display" help="Milliseconds per pixel; smaller values move faster."
-# @config   show_prep bool "Show preparation stages" default=true group="Progress" help="During layer 0, show temperatures, homing, bed probing and startup messages instead of 0%."
-# @config   console_stages bool "Read console stage messages" default=true group="Progress" help="Read printer actions from the Moonraker console (Snapmaker U1). Others use heaters and M117."
-# @config   prelayer_zero bool "0% until first layer" default=true group="Progress" help="Show zero while Klipper reports layer 0; avoids counting the start G-code as printing."
-# @config   correction number "Percent correction" default=0 min=-10 max=10 unit=% group="Progress" help="Visual progress correction only. ETA always uses unmodified Moonraker file progress."
-# @config   eta_mode select "ETA calculation" default=adaptive options=adaptive,slicer group="ETA" help="Adaptive blends observed pace into the slicer estimate. Slicer shows the estimate as is."
-# @config   eta_debug bool "Log ETA calculations" default=false group="ETA" help="Log ETA source, estimates and samples about once a minute. Turn off after testing."
-# @config   notify_done bool "Completion notification" default=false group="Alerts" help="Shows one alert after a live print finishes; initial completed state is ignored."
-# @config   sound_done bool  "Play completion melody" default=false group="Alerts" help="Only plays if completion notification is enabled. Off by default."
-# @config   notify_error bool "Failure notification" default=false group="Alerts" help="Alerts after a live print enters error state; cancelled prints are ignored."
-# @config   notify_pause bool "Notify on print pause" default=true group="Alerts" help="One notification on a witnessed printing-to-paused transition; no automatic sound."
-# @config   sound_pause bool "Sound on pause or runout" default=false group="Alerts" help="Off by default. Alerts only on verified print-state transitions."
-# @config   notify_first bool "First-layer finished alert" default=false group="Milestones" help="One optional alert when a print advances from layer 1 to layer 2."
-# @config   notify_half bool "50% progress alert" default=false group="Milestones" help="Based on file progress; not necessarily 50% of elapsed print time."
-# @config   notify_ninety bool "90% progress alert" default=false group="Milestones" help="Based on file progress; not necessarily 90% of elapsed print time."
-# @config   sound_milestone bool "Milestone chime" default=false group="Milestones" help="Play a short tone when an enabled milestone alert is shown."
-# @config   sound_error bool "Sound on print failure" default=false group="Alerts" help="Only plays with Failure notification enabled."
-# @config   done_audio select "Completion sound source" default=builtin options=builtin,saved,custom group="Sounds" help="Built-in chime, device-stored MP3/melody, or your own RTTTL text."
-# @config   done_audio_value text "Completion sound name / RTTTL" default="" maxlen=512 group="Sounds" help="For saved: use filename without .mp3 or .txt. For custom: paste full RTTTL."
-# @config   pause_audio select "Pause sound source" default=builtin options=builtin,saved,custom group="Sounds"
-# @config   pause_audio_value text "Pause sound name / RTTTL" default="" maxlen=512 group="Sounds"
-# @config   runout_audio select "Runout sound source" default=builtin options=builtin,saved,custom group="Sounds" help="Independent sound for a pause confidently identified as filament out."
-# @config   runout_audio_value text "Runout sound name / RTTTL" default="" maxlen=512 group="Sounds"
-# @config   milestone_audio select "Milestone sound source" default=builtin options=builtin,saved,custom group="Sounds"
-# @config   milestone_audio_value text "Milestone sound name / RTTTL" default="" maxlen=512 group="Sounds"
-# @config   error_audio select "Failure sound source" default=builtin options=builtin,saved,custom group="Sounds"
-# @config   error_audio_value text "Failure sound name / RTTTL" default="" maxlen=512 group="Sounds"
-# @config   debug_audio bool "Debug audio logging" default=false group="Sounds" help="Logs sound selection and notification results in the Log tab. Turn off after testing."
-# @config   heat_progress bool "Measured heating progress" default=true group="Progress" help="Temperature bar uses starting temperature and active target, not file progress."
-# @config   show_material bool "Material and tool page" default=true group="Display" help="Show active tool, its material if available, and total job filament use."
-# @config   filament_units select "Filament display units" default=meters options=meters,grams,alternate group="Filament" help="Meters, estimated grams, or switch units each time the material page is displayed."
-# @config   filament_dia number "Filament diameter" default=1.75 min=1.0 max=3.0 unit=mm group="Filament" help="Used only to estimate grams when slicer weight metadata is unavailable."
-# @config   filament_density number "Filament density" default=1.24 min=0.70 max=2.00 group="Filament" help="g/cm3 for fallback gram estimates (PLA about 1.24). Mixed materials may require a compromise."
-# @config   notify_tool bool "Notify active tool changes" default=false group="Alerts" help="One silent notification after toolhead.extruder changes while printing."
-# @config   show_active_tool bool "Active tool on main screen" default=true group="Display" help="Show active extruder next to ETA when there is enough room."
-# @config   tool_numbering select "Tool label style" default=klipper options=klipper,head group="Display" help="Klipper: T0/T1/T2/T3. Head: H1/H2/H3/H4 for physical head numbers."
-# @config   demo_tool select "Preview active tool" default=extruder2 options=extruder,extruder1,extruder2,extruder3,extruder4,extruder5,extruder6,extruder7,extruder8 group="Display" help="Used only in Preview without printing. The preview printer has 4 heads, or more if needed."
-# @config   debug_tool bool "Log tool changes" default=false group="Connection" help="Write [KD TOOL] lines when the active Klipper extruder changes or is first detected."
-# @config   alert_offline bool "Monitor live-print disconnects" default=false group="Connection" help="Off by default. Warn only after a live print was seen; never alert for normal idle shutdown."
-# @config   notify_offline bool "Notify if print connection lost" default=false group="Connection" help="Requires Monitor live-print disconnects. Alerts after 3 failed polls. No sound."
+# @config   host      text   "Moonraker IP or hostname" default="" group="Connection" help="Printer address without http://, e.g. 192.168.1.50 or voron.local."
+# @config   port      number "Moonraker port" default=7125 min=1 max=65535 group="Connection" help="7125 for Moonraker. 80 also works when Mainsail or Fluidd serves the printer."
+# @config   poll      number "Refresh interval" default=8 min=3 max=60 unit=s group="Connection" help="How often to ask the printer for news during a print."
+# @config   idle_poll number "Idle refresh interval" default=30 min=10 max=300 unit=s group="Connection" help="Used while no print runs or the printer is off, to keep the shared HTTP queue free."
+# @config   style     select "Look" default=standard options=minimal,standard,expressive group="Display" help="Minimal: static. Standard: glow and page slides. Expressive: adds stage art and a printer scene."
+# @config   accent    color  "Progress color" default=#33EE88 group="Display"
+# @config   page_secs number "Seconds per page" default=3 min=2 max=12 unit=s group="Display" help="Pages cycle at this pace while printing; the app stays for one full cycle."
+# @config   show_material bool "Material page" default=true group="Display" help="The active tool's material and the filament used by the job."
+# @config   tool_numbering select "Tool labels" default=klipper options=klipper,head group="Display" help="klipper: T0, T1, T2... head: H1, H2, H3... for printers that number heads from 1."
+# @config   filament_units select "Filament units" default=meters options=meters,grams,alternate group="Display" help="alternate switches between meters and grams on each visit to the material page."
+# @config   show_prep bool   "Show preparation stages" default=true group="Progress" help="Before the first layer, show what the printer is doing (heating, probing...) instead of 0%."
+# @config   eta_mode  select "ETA calculation" default=adaptive options=adaptive,slicer group="Progress" help="adaptive blends the observed pace into the slicer estimate. slicer shows the estimate as is."
+# @config   notify_done  bool "Print finished" default=false group="Alerts"
+# @config   notify_error bool "Print failed" default=false group="Alerts" help="A Klipper error during a print. Cancelled prints never alert."
+# @config   notify_pause bool "Print paused or filament out" default=true group="Alerts"
+# @config   milestones select "Progress alerts" default=off options=off,first_layer,half,half_ninety,all group="Alerts" help="first_layer: layer 1 done. half: 50%. half_ninety: 50% and 90%. all: all three."
+# @config   notify_tool  bool "Tool changes" default=false group="Alerts" help="A silent alert with the new tool and its material."
+# @config   offline_alert bool "Printer lost mid-print" default=false group="Alerts" help="After 3 failed refreshes during a print: alert and show LINK LOST. Never while idle."
+# @config   sounds    select "Alert sounds" default=off options=off,failures,all group="Alerts" help="failures: errors, pauses and runouts. all: also finished and progress alerts."
+# @config   debug     bool   "Debug logging" default=false group="Advanced" help="Write [KD] lines about ETA, tools and sounds to the Log tab. Turn off after testing."
+# @config   demo      bool   "Preview without printing" default=false group="Advanced"
+# @config   demo_state select "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone group="Advanced" help="Shown while Preview is on. Press select to test that state's alert."
+
+# ======================================================================
+#  BEFORE YOU EDIT THIS SCRIPT
+#  Every normal option is on the app's settings page: Apps tab, gear
+#  button. You do not need to change any code to use this app.
+#
+#  A few advanced options (custom alert sounds, glow, filament density)
+#  live in the "ADVANCED OPTIONS" block at the top of init() below.
+#
+#  WARNING: once you edit this script, AWTRIX stops offering you Hub
+#  updates for it. To get a newer version later, install it again from
+#  the Hub and redo your edits. Keep a copy of your changes.
+# ======================================================================
 
 import json
 import string
@@ -69,16 +46,16 @@ import math
 class KlipperDashboard
   var base, host, poll_sec, tick, demo, accent, turn_ms
   var state, last_ok, filename, file_label, layer, total_layers, pct, elapsed, total_est
-  var remaining, tool, tool_temp, bed_temp, page, auto_pages, page_secs, page_started
+  var remaining, tool, tool_temp, bed_temp, page, page_secs, page_started
   var layer_label, pct_label, eta_label, finish_label, tool_label, bed_label
-  var demo_state, bar, anim, glow_trail, glow_speed, notify_done, sound_done, notify_error
+  var demo_state, glow_trail, glow_speed, notify_done, sound_done, notify_error
   var observed, in_flight, correction, prelayer_zero
   var show_prep, console_stages, tool_target, bed_target
   var phase_name, phase_detail, phase_time, phase_ttl, phase_label, phase_sub
   var console_busy, console_time, stage_tick, m117, m117_last
   var probe_x, probe_y, probe_time
   var notify_pause, sound_pause, notify_first, notify_half, notify_ninety, sound_milestone
-  var heat_progress, show_material, notify_tool, alert_offline, notify_offline
+  var show_material, notify_tool, alert_offline, notify_offline
   var show_active_tool, tool_numbering, demo_tool, debug_tool, tool_seen, tool_logged, active_tool_label
   var prev_layer, prev_pct, first_alerted, half_alerted, ninety_alerted
   var filament_used, filament_total, filament_weight_total, material_label, used_label
@@ -88,40 +65,70 @@ class KlipperDashboard
   var capabilities_loaded, capabilities_busy, capability_tick, sensor_list, extruders
   var query_url, idle_poll, gcode_start, gcode_end, sensor_prior, sensor_loss_time, pause_reason, stats_message
   var offline_failures, offline, layer_short, eta_short
-  var sound_error, done_audio, done_audio_value, pause_audio, pause_audio_value
-  var runout_audio, runout_audio_value, milestone_audio, milestone_audio_value, error_audio, error_audio_value
+  var sound_error, done_sound, error_sound, pause_sound, runout_sound, milestone_sound
   var debug_audio
   var eta_mode, eta_debug, eta_file_fraction, eta_start_elapsed, eta_start_progress
   var eta_start_seen, eta_smooth_work, eta_smoothed, eta_slicer_remaining
   var eta_adaptive_remaining, eta_source, eta_adjusted_progress
   var eta_rate_time, eta_rate_progress, eta_rate, eta_rate_samples
   var eta_debug_tick
-  var style, printer_scene, prep_sprites, page_fx, prev_page, transition_started, transition_time
+  var style, prev_page, transition_started, transition_time
   var extrude_x, extrude_y, thermo_pixels, warning_pixels
 
   def init()
+    # ------------------------------------------------------------------
+    # ADVANCED OPTIONS. Everything else is on the app's settings page.
+    # Most people never need to change these.
+    #
+    # WARNING: editing anything in this script stops AWTRIX from offering
+    # Hub updates for it. To get a newer version later, install it again
+    # from the Hub and redo your edits, so keep a note of what you changed.
+    #
+    # Alert sounds, played when "Alert sounds" allows them. Each one is
+    # either a sound saved on the clock, by its file name without .mp3
+    # (e.g. "chime"), or RTTTL melody text ("name:d=8,o=5,b=180:c,e,g").
+    # If the clock cannot play a value, the alert still appears, silently.
+    self.done_sound = "done:d=8,o=5,b=180:c,e,g,4c6"
+    self.error_sound = "error:d=8,o=5,b=150:g4,p,e4,g4"
+    self.pause_sound = "pause:d=8,o=5,b=150:g,p,e"
+    self.runout_sound = "runout:d=8,o=5,b=165:c6,p,a,p,c6"
+    self.milestone_sound = "layer:d=16,o=5,b=180:c,e,g"
+    # Progress-bar glow: trail length 3-18 px, speed 40-350 ms per pixel.
+    self.glow_trail = 8
+    self.glow_speed = 110
+    # How long the app stays on screen while preparing or paused, in ms.
+    self.turn_ms = 8000
+    # Shift the displayed percentage by -10..10. The ETA is not affected.
+    self.correction = 0
+    # Keep showing 0% while Klipper reports layer 0 (start G-code).
+    self.prelayer_zero = true
+    # Read stage names (homing, mesh, loading...) from the Moonraker console.
+    self.console_stages = true
+    # Gram estimates when the slicer gives no weight: diameter in mm and
+    # density in g/cm3 (PLA about 1.24, PETG 1.27, ABS 1.04).
+    self.filament_dia = 1.75
+    self.filament_density = 1.24
+    # Page dots at the top right; active-tool badge on the main page
+    # (the badge only ever appears on printers with several heads).
+    self.show_pips = true
+    self.show_active_tool = true
+    # The active head in Preview: extruder, extruder1 ... extruder8.
+    self.demo_tool = "extruder2"
+    # ------------------------------------------------------------------
+
     self.host = store.get("host", "")
     self.base = format("http://%s:%d", self.host, int(store.get("port", 7125)))
     self.poll_sec = max(3, int(store.get("poll", 8)))
     self.idle_poll = max(self.poll_sec, min(300, int(store.get("idle_poll", 30))))
-    self.turn_ms = max(4, int(store.get("turn", 8))) * 1000
-    self.auto_pages = store.get("auto_pages", true)
     self.page_secs = max(2, min(12, int(store.get("page_secs", 3))))
-    self.show_pips = store.get("show_pips", true)
     self.page_started = now_ms()
     self.style = store.get("style", "standard")
     if self.style != "minimal" && self.style != "standard" && self.style != "expressive"
       self.style = "standard"
     end
-    self.page_fx = store.get("page_fx", "auto")
-    if self.page_fx != "auto" && self.page_fx != "off" && self.page_fx != "slide"
-      self.page_fx = "auto"
-    end
     self.prev_page = -1
     self.transition_started = -10000
     self.transition_time = 450
-    self.printer_scene = store.get("printer_scene", true)
-    self.prep_sprites = store.get("prep_sprites", true)
     # A 17-point original filament path: a vertical strand flowing from
     # the nozzle, then curling into two short loops on the build plate.
     # Prepared once; no fresh arrays allocated during draw().
@@ -173,14 +180,7 @@ class KlipperDashboard
     ]
     self.demo = store.get("demo", false)
     self.demo_state = store.get("demo_state", "printing")
-    self.bar = store.get("bar", true)
-    self.anim = store.get("anim", true)
-    self.glow_trail = max(3, min(18, int(store.get("glow_trail", 8))))
-    self.glow_speed = max(40, min(350, int(store.get("glow_speed", 110))))
-    self.correction = max(-10, min(10, int(store.get("correction", 0))))
-    self.prelayer_zero = store.get("prelayer_zero", true)
     self.show_prep = store.get("show_prep", true)
-    self.console_stages = store.get("console_stages", true)
     self.console_busy = false
     self.console_time = 0
     self.stage_tick = 0
@@ -198,49 +198,40 @@ class KlipperDashboard
     self.tool_target = nil
     self.bed_target = nil
     self.notify_done = store.get("notify_done", false)
-    self.sound_done = store.get("sound_done", false)
     self.notify_error = store.get("notify_error", false)
     self.notify_pause = store.get("notify_pause", true)
-    self.sound_pause = store.get("sound_pause", false)
-    self.notify_first = store.get("notify_first", false)
-    self.notify_half = store.get("notify_half", false)
-    self.notify_ninety = store.get("notify_ninety", false)
-    self.sound_milestone = store.get("sound_milestone", false)
-    # The existing booleans remain master opt-ins, preserving v0.4.0 choices.
-    self.sound_error = store.get("sound_error", false)
-    self.done_audio = store.get("done_audio", "builtin")
-    self.done_audio_value = store.get("done_audio_value", "")
-    self.pause_audio = store.get("pause_audio", "builtin")
-    self.pause_audio_value = store.get("pause_audio_value", "")
-    self.runout_audio = store.get("runout_audio", "builtin")
-    self.runout_audio_value = store.get("runout_audio_value", "")
-    self.milestone_audio = store.get("milestone_audio", "builtin")
-    self.milestone_audio_value = store.get("milestone_audio_value", "")
-    self.error_audio = store.get("error_audio", "builtin")
-    self.error_audio_value = store.get("error_audio_value", "")
-    self.debug_audio = store.get("debug_audio", false)
+    # One select covers the three milestone alerts.
+    var milestones = store.get("milestones", "off")
+    self.notify_first = milestones == "first_layer" || milestones == "all"
+    self.notify_half = milestones == "half" || milestones == "half_ninety" || milestones == "all"
+    self.notify_ninety = milestones == "half_ninety" || milestones == "all"
+    # off / failures (error, pause, runout) / all (also finished, milestones).
+    var sounds = store.get("sounds", "off")
+    self.sound_error = sounds == "failures" || sounds == "all"
+    self.sound_pause = self.sound_error
+    self.sound_done = sounds == "all"
+    self.sound_milestone = sounds == "all"
+    # One switch for all [KD ...] log lines.
+    var debug = store.get("debug", false)
+    self.debug_audio = debug
+    self.eta_debug = debug
+    self.debug_tool = debug
     self.eta_mode = store.get("eta_mode", "adaptive")
-    self.eta_debug = store.get("eta_debug", false)
     self.reset_eta()
-    self.heat_progress = store.get("heat_progress", true)
     self.show_material = store.get("show_material", true)
     self.filament_units = store.get("filament_units", "meters")
-    self.filament_dia = max(1.0, min(3.0, num(store.get("filament_dia", 1.75))))
-    self.filament_density = max(0.70, min(2.00, num(store.get("filament_density", 1.24))))
     # Remember the unit used on the last material-page visit. A script
     # reload must not silently restart every alternate cycle in grams.
     # Default true makes the first alternate visit show meters.
     self.filament_alt_grams = store.get("filament_alt_grams_last", true)
     self.notify_tool = store.get("notify_tool", false)
-    self.show_active_tool = store.get("show_active_tool", true)
     self.tool_numbering = store.get("tool_numbering", "klipper")
-    self.demo_tool = store.get("demo_tool", "extruder2")
-    self.debug_tool = store.get("debug_tool", false)
     self.tool_seen = false
     self.tool_logged = false
     self.active_tool_label = ""
-    self.alert_offline = store.get("alert_offline", false)
-    self.notify_offline = store.get("notify_offline", false)
+    # One switch: show LINK LOST and send one alert.
+    self.alert_offline = store.get("offline_alert", false)
+    self.notify_offline = self.alert_offline
     self.prev_layer = nil
     self.prev_pct = nil
     self.first_alerted = false
@@ -791,67 +782,33 @@ class KlipperDashboard
     end
   end
 
-  # Keep source selection behavior identical to v0.4.1. Record WHY a
-  # fallback happened; a valid saved name never deliberately falls back.
-  def selected_sound(source, value, builtin, event_name)
-    if source == "saved"
-      if type(value) == "string" && size(value) > 0 && size(value) <= 96
-        # A leading/trailing space caused an earlier melody lookup to fail.
-        # Normalize ordinary spaces before validating, without allowing paths.
-        var match = re.search("^ *([A-Za-z0-9_-]+) *$", value)
-        if match != nil
-          var cleaned = match[1]
-          if size(cleaned) <= 32
-            self.audio_log(event_name + " selected=file " + cleaned)
-            return {"file": cleaned}
-          end
-        end
-        self.audio_log(event_name + " fallback=bad_name")
-      else
-        self.audio_log(event_name + " fallback=empty_or_length")
-      end
-    elif source == "custom"
-      if type(value) == "string" && size(value) > 2 && size(value) <= 512
-        if re.search("^[A-Za-z0-9_-]+:[^:]*:.+$", value) != nil
-          self.audio_log(event_name + " selected=custom_rtttl bytes=" + str(size(value)))
-          return {"rtttl": value}
-        end
-        self.audio_log(event_name + " fallback=bad_rtttl_shape")
-      else
-        self.audio_log(event_name + " fallback=empty_or_length")
-      end
-    else
-      self.audio_log(event_name + " selected=builtin source=" + str(source))
+  # A sound from the ADVANCED OPTIONS block: a saved sound's name (letters,
+  # digits, - and _) plays that file; anything else is sent as RTTTL text.
+  def sound_for(value, event_name)
+    var m = re.search("^ *([A-Za-z0-9_-]+) *$", value)
+    if m != nil && size(m[1]) <= 32
+      self.audio_log(event_name + " sound=file " + m[1])
+      return {"file": m[1]}
     end
-    if source == "saved" || source == "custom"
-      self.audio_log(event_name + " selected=builtin_fallback")
-    end
-    return {"rtttl": builtin}
+    self.audio_log(event_name + " sound=rtttl")
+    return {"rtttl": value}
   end
 
+  # notify() refuses a payload whose sound is malformed. Never lose the
+  # alert itself to a bad custom melody: resend it silently.
   def send_alert(event_name, payload)
-    if !self.debug_audio
-      notify(payload)
-      return
-    end
-    var audio = payload.find("sound")
-    if audio == nil
-      self.audio_log(event_name + " sound=disabled")
-    else
-      if isinstance(audio, map)
-        if audio.find("file") != nil
-          self.audio_log(event_name + " outgoing_file=" + str(audio.find("file")))
-        elif audio.find("rtttl") != nil
-          self.audio_log(event_name + " outgoing=RTTTL")
-        end
-      end
-    end
+    var accepted = false
     try
-      var accepted = notify(payload)
-      self.audio_log(event_name + " notify_accepted=" + str(accepted))
+      accepted = notify(payload)
+      if !accepted && payload.find("sound") != nil
+        self.audio_log(event_name + " sound refused, sending silently")
+        payload.remove("sound")
+        accepted = notify(payload)
+      end
     except .. as err, msg
       self.audio_log(event_name + " notify_error=" + str(err) + ":" + str(msg))
     end
+    self.audio_log(event_name + " accepted=" + str(accepted))
   end
 
   def pause_alert()
@@ -860,11 +817,9 @@ class KlipperDashboard
     var alert = {"text": msg, "textColor": 0xFFBC44, "durationMs": 6500}
     if self.sound_pause
       if msg == "FILAMENT OUT" || msg == "CHECK FILAMENT"
-        alert["sound"] = self.selected_sound(self.runout_audio, self.runout_audio_value,
-                         "runout:d=8,o=5,b=165:c6,p,a,p,c6", "runout")
+        alert["sound"] = self.sound_for(self.runout_sound, "runout")
       else
-        alert["sound"] = self.selected_sound(self.pause_audio, self.pause_audio_value,
-                         "pause:d=8,o=5,b=150:g,p,e", "pause")
+        alert["sound"] = self.sound_for(self.pause_sound, "pause")
       end
     end
     self.send_alert("pause", alert)
@@ -873,8 +828,7 @@ class KlipperDashboard
   def milestone_alert(label)
     var alert = {"text": label, "textColor": 0x66EABB, "durationMs": 4000}
     if self.sound_milestone
-      alert["sound"] = self.selected_sound(self.milestone_audio, self.milestone_audio_value,
-                       "layer:d=16,o=5,b=180:c,e,g", "milestone")
+      alert["sound"] = self.sound_for(self.milestone_sound, "milestone")
     end
     self.send_alert("milestone", alert)
   end
@@ -885,8 +839,7 @@ class KlipperDashboard
                    "durationMs": 8000, "progress": 100,
                    "progressColor": 0x44EE99, "progressTrackColor": 0x14251B}
     if self.sound_done
-      payload["sound"] = self.selected_sound(self.done_audio, self.done_audio_value,
-                         "done:d=8,o=5,b=180:c,e,g,4c6", "complete")
+      payload["sound"] = self.sound_for(self.done_sound, "complete")
     end
     self.send_alert("complete", payload)
   end
@@ -895,8 +848,7 @@ class KlipperDashboard
     var payload = {"text": "PRINT ERROR", "textColor": 0xFF5555,
                    "durationMs": 10000}
     if self.sound_error
-      payload["sound"] = self.selected_sound(self.error_audio, self.error_audio_value,
-                         "error:d=8,o=5,b=150:g4,p,e4,g4", "error")
+      payload["sound"] = self.sound_for(self.error_sound, "error")
     end
     self.send_alert("error", payload)
   end
@@ -1177,11 +1129,10 @@ class KlipperDashboard
   # During preparation there is no meaningful print percentage, so sweep
   # over all 52 columns; during printing, stay within the lit percentage.
   def draw_comet_bar(pct, ink, indeterminate)
-    if !self.bar return end
     var rr = (ink >> 16) & 255
     var gg = (ink >> 8) & 255
     var bb = ink & 255
-    var animate = self.style != "minimal" && self.anim && self.state == "printing" && (indeterminate || pct > 0)
+    var animate = self.style != "minimal" && self.state == "printing" && (indeterminate || pct > 0)
     var base_r = rr
     var base_g = gg
     var base_b = bb
@@ -1236,7 +1187,6 @@ class KlipperDashboard
   # Measure progress from initial temperature to target. Reset when target
   # changes; do not present an invented heating percentage for homing/mesh.
   def heating_percent()
-    if !self.heat_progress return -1 end
     var start = nil
     var actual = nil
     var goal = nil
@@ -1605,7 +1555,7 @@ class KlipperDashboard
     elif self.phase_label == "PRIMING" || self.phase_label == "FLOW CAL"
       head_color = 0x4BEEA0
     end
-    if self.style == "expressive" && self.prep_sprites
+    if self.style == "expressive"
       var name = self.phase_label
       if name == "HEATING BED" name = "BED HEAT"
       elif name == "HEAT NOZZLE" || name == "NOZZLE TEMP" name = "NOZZLE"
@@ -2020,12 +1970,12 @@ class KlipperDashboard
   # Pauses and startup phases remain a single status screen.
   def page_count()
     var n = self.show_material ? 4 : 3
-    if self.style == "expressive" && self.printer_scene n += 1 end
+    if self.style == "expressive" n += 1 end
     return n
   end
 
   def cycling_now()
-    return self.auto_pages && self.state == "printing" && !self.is_preparing()
+    return self.state == "printing" && !self.is_preparing()
   end
 
   def duration()
@@ -2055,8 +2005,7 @@ class KlipperDashboard
 
   def transitions_on()
     if self.state != "printing" || self.is_preparing() return false end
-    if self.page_fx == "off" return false end
-    if self.page_fx == "auto" && self.style == "minimal" return false end
+    if self.style == "minimal" return false end
     return self.page_count() > 1
   end
 
@@ -2222,7 +2171,7 @@ class KlipperDashboard
       pixel(5, 2, 0x33EE88)
       text(9, 6, "PRINT DONE", 0x33EE88)
       text(0, 14, "150/150  100%", 0x66CCFF)
-      if self.bar progress(100, 0x33EE88, 0x14251B) end
+      progress(100, 0x33EE88, 0x14251B)
       return
     end
     if self.demo && self.state == "error"
@@ -2258,7 +2207,7 @@ class KlipperDashboard
     # Use the same gradient math as the preparation status screens.
     self.draw_comet_bar(self.pct, ink, false)
     self.draw_page_pips()
-    if self.anim && self.state == "paused" && int(now_ms() / 750) % 2 == 0
+    if self.style != "minimal" && self.state == "paused" && int(now_ms() / 750) % 2 == 0
       pixel(width() - 1, 0, 0xFFB000)
     end
   end
