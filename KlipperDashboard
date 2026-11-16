@@ -1,0 +1,2280 @@
+# @name     Klipper Dashboard
+# @desc     Klipper printer status, multi-head materials, adaptive ETA and self-drawn status art
+# @version  0.6.11
+# @display  52x16
+# @config   host    text    "Moonraker IP or hostname" default="" group="Connection" help="No http:// prefix. Set your printer's LAN address."
+# @config   port    number  "Moonraker port" default=7125 min=1 max=65535 group="Connection"
+# @config   poll    number  "Refresh interval" default=8 min=3 max=60 unit=s group="Connection"
+# @config   style select "Animation profile" default=standard options=minimal,standard,expressive group="Animations" help="Minimal: static bar; Standard: familiar gradient; Expressive: animated preparation and printer scene. Sounds are independent."
+# @config   page_fx select "Printing page transitions" default=auto options=auto,off,slide group="Animations" help="Auto uses no transitions in Minimal, 450 ms vertical slides in Standard/Expressive."
+# @config   printer_scene bool "Animated printer page" default=true group="Animations" help="Expressive only: adds an original miniature printer and growing model scene."
+# @config   prep_sprites bool "Animated preparation icons" default=true group="Animations" help="Expressive only: thermometer, enclosed-printer homing motion, mesh grid, filament loading and live extrusion drawings."
+# @config   demo    bool    "Preview without printing" default=false group="Display"
+# @config   accent  color   "Progress color" default=#33EE88 group="Display"
+# @config   turn    number  "Seconds per turn (manual/preparation)" default=8 min=4 max=30 unit=s group="Display" help="Used when page cycling is off, or while preparing/paused."
+# @config   auto_pages bool "Auto-cycle pages while printing" default=true group="Display" help="Show progress, temperatures, filename and optional material page automatically each app turn."
+# @config   page_secs number "Seconds per page" default=3 min=2 max=12 unit=s group="Display" help="Each enabled page is shown for this long; the app turn expands to fit one complete cycle."
+# @config   show_pips bool "Show page position dots" default=true group="Display" help="Small dots at upper right show the current page within the Klipper app's rotation."
+# @config   demo_state select  "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone group="Display" help="Only used when Preview without printing is on."
+# @config   bar     bool    "Show progress bar" default=true group="Display" help="Show print progress along the bottom row, including when animation is off."
+# @config   anim    bool    "Animated gradient glow" default=true group="Display" help="A smooth comet highlight on both printing and preparation screens."
+# @config   glow_trail slider "Glow trail length" default=8 min=3 max=18 step=1 unit=px group="Display" help="3 gives a short sparkle; 18 creates a long, visible fade."
+# @config   glow_speed number "Glow speed" default=110 min=40 max=350 unit=ms group="Display" help="Milliseconds per pixel; smaller values move faster."
+# @config   show_prep bool "Show preparation stages" default=true group="Progress" help="During layer 0, show temperatures, homing, bed probing and startup messages instead of 0%."
+# @config   console_stages bool "Read console stage messages" default=true group="Progress" help="Use read-only Moonraker console history to detect printer actions. Snapmaker U1 supported; other printers use heater/M117 fallback."
+# @config   prelayer_zero bool "0% until first layer" default=true group="Progress" help="Show zero while Klipper reports layer 0; avoids counting the start G-code as printing."
+# @config   correction number "Percent correction" default=0 min=-10 max=10 unit=% group="Progress" help="Visual progress correction only. ETA always uses unmodified Moonraker file progress."
+# @config   eta_mode select "ETA calculation" default=adaptive options=adaptive,slicer group="ETA" help="Adaptive gently blends observed pace with slicer time; Slicer uses the original estimate. Both fall back when metadata is missing."
+# @config   eta_debug bool "Log ETA calculations" default=false group="ETA" help="Log ETA source, both estimates, and sample confidence about once per minute. Disable after testing."
+# @config   notify_done bool "Completion notification" default=false group="Alerts" help="Shows one alert after a live print finishes; initial completed state is ignored."
+# @config   sound_done bool  "Play completion melody" default=false group="Alerts" help="Only plays if completion notification is enabled. Off by default."
+# @config   notify_error bool "Failure notification" default=false group="Alerts" help="Alerts after a live print enters error state; cancelled prints are ignored."
+# @config   notify_pause bool "Notify on print pause" default=true group="Alerts" help="One notification on a witnessed printing-to-paused transition; no automatic sound."
+# @config   sound_pause bool "Sound on pause or runout" default=false group="Alerts" help="Off by default. Alerts only on verified print-state transitions."
+# @config   notify_first bool "First-layer finished alert" default=false group="Milestones" help="One optional alert when a print advances from layer 1 to layer 2."
+# @config   notify_half bool "50% progress alert" default=false group="Milestones" help="Based on file progress; not necessarily 50% of elapsed print time."
+# @config   notify_ninety bool "90% progress alert" default=false group="Milestones" help="Based on file progress; not necessarily 90% of elapsed print time."
+# @config   sound_milestone bool "Milestone chime" default=false group="Milestones" help="Play a short tone when an enabled milestone alert is shown."
+# @config   sound_error bool "Sound on print failure" default=false group="Alerts" help="Only plays with Failure notification enabled."
+# @config   done_audio select "Completion sound source" default=builtin options=builtin,saved,custom group="Sounds" help="Built-in chime, device-stored MP3/melody, or your own RTTTL text."
+# @config   done_audio_value text "Completion sound name / RTTTL" default="" maxlen=512 group="Sounds" help="For saved: use filename without .mp3 or .txt. For custom: paste full RTTTL."
+# @config   pause_audio select "Pause sound source" default=builtin options=builtin,saved,custom group="Sounds"
+# @config   pause_audio_value text "Pause sound name / RTTTL" default="" maxlen=512 group="Sounds"
+# @config   runout_audio select "Runout sound source" default=builtin options=builtin,saved,custom group="Sounds" help="Independent sound for a pause confidently identified as filament out."
+# @config   runout_audio_value text "Runout sound name / RTTTL" default="" maxlen=512 group="Sounds"
+# @config   milestone_audio select "Milestone sound source" default=builtin options=builtin,saved,custom group="Sounds"
+# @config   milestone_audio_value text "Milestone sound name / RTTTL" default="" maxlen=512 group="Sounds"
+# @config   error_audio select "Failure sound source" default=builtin options=builtin,saved,custom group="Sounds"
+# @config   error_audio_value text "Failure sound name / RTTTL" default="" maxlen=512 group="Sounds"
+# @config   debug_audio bool "Debug audio logging" default=false group="Sounds" help="Logs sound selection and notification results in the Log tab. Turn off after testing."
+# @config   heat_progress bool "Measured heating progress" default=true group="Progress" help="Temperature bar uses starting temperature and active target, not file progress."
+# @config   show_material bool "Material and tool page" default=true group="Display" help="Show active tool, its material if available, and total job filament use."
+# @config   filament_units select "Filament display units" default=meters options=meters,grams,alternate group="Filament" help="Meters, estimated grams, or switch units each time the material page is displayed."
+# @config   filament_dia number "Filament diameter" default=1.75 min=1.0 max=3.0 unit=mm group="Filament" help="Used only to estimate grams when slicer weight metadata is unavailable."
+# @config   filament_density number "Filament density" default=1.24 min=0.70 max=2.00 group="Filament" help="g/cm3 for fallback gram estimates (PLA about 1.24). Mixed materials may require a compromise."
+# @config   notify_tool bool "Notify active tool changes" default=false group="Alerts" help="One silent notification after toolhead.extruder changes while printing."
+# @config   show_active_tool bool "Active tool on main screen" default=true group="Display" help="Show active extruder next to ETA when there is enough room."
+# @config   tool_numbering select "Tool label style" default=klipper options=klipper,head group="Display" help="Klipper: T0/T1/T2/T3. Head: H1/H2/H3/H4 for physical head numbers."
+# @config   demo_tool select "Preview active tool" default=extruder2 options=extruder,extruder1,extruder2,extruder3 group="Display" help="Used only in Preview without printing."
+# @config   debug_tool bool "Log tool changes" default=false group="Connection" help="Write [KD TOOL] lines when the active Klipper extruder changes or is first detected."
+# @config   alert_offline bool "Monitor live-print disconnects" default=false group="Connection" help="Off by default. Warn only after a live print was seen; never alert for normal idle shutdown."
+# @config   notify_offline bool "Notify if print connection lost" default=false group="Connection" help="Requires Monitor live-print disconnects. Alerts after 3 failed polls. No sound."
+
+import json
+import string
+import math
+
+class KlipperDashboard
+  var base, host, poll_sec, tick, demo, accent, turn_ms
+  var state, last_ok, filename, file_label, layer, total_layers, pct, elapsed, total_est
+  var remaining, tool, tool_temp, bed_temp, page, auto_pages, page_secs, page_started
+  var layer_label, pct_label, eta_label, finish_label, tool_label, bed_label
+  var demo_state, bar, anim, glow_trail, glow_speed, notify_done, sound_done, notify_error
+  var observed, in_flight, correction, prelayer_zero
+  var show_prep, console_stages, tool_target, bed_target
+  var phase_name, phase_detail, phase_time, phase_ttl, phase_label, phase_sub
+  var console_busy, console_time, stage_tick, display_busy, m117, m117_last
+  var probe_x, probe_y, probe_time
+  var notify_pause, sound_pause, notify_first, notify_half, notify_ninety, sound_milestone
+  var heat_progress, show_material, notify_tool, alert_offline, notify_offline
+  var show_active_tool, tool_numbering, demo_tool, debug_tool, tool_seen, tool_logged, active_tool_label
+  var prev_layer, prev_pct, prev_tool, first_alerted, half_alerted, ninety_alerted
+  var filament_used, filament_total, filament_weight_total, material, material_label, used_label, planned_label
+  var meta_materials, meta_tools, slot_materials, slot_subtypes, slot_supported, slot_busy, slot_last
+  var show_pips, filament_units, filament_dia, filament_density, filament_alt_grams, tool_count
+  var heat_bed_start, heat_bed_goal, heat_tool_start, heat_tool_goal, heat_pct
+  var capabilities_loaded, capabilities_busy, capability_tick, sensor_list, sensor_index
+  var sensor_busy, sensor_prior, sensor_loss_time, pause_reason, stats_message
+  var offline_failures, offline, active_before_offline, last_state, paused_at
+  var sound_error, done_audio, done_audio_value, pause_audio, pause_audio_value
+  var runout_audio, runout_audio_value, milestone_audio, milestone_audio_value, error_audio, error_audio_value
+  var debug_audio
+  var eta_mode, eta_debug, eta_file_fraction, eta_start_elapsed, eta_start_progress
+  var eta_start_seen, eta_smooth_work, eta_smoothed, eta_slicer_remaining
+  var eta_adaptive_remaining, eta_source, eta_adjusted_progress
+  var eta_rate_time, eta_rate_progress, eta_rate, eta_rate_samples
+  var eta_debug_tick
+  var style, printer_scene, prep_sprites, page_fx, prev_page, transition_started, transition_time
+  var extrude_x, extrude_y, thermo_pixels, warning_pixels
+
+  def init()
+    self.host = store.get("host", "")
+    self.base = format("http://%s:%d", self.host, int(store.get("port", 7125)))
+    self.poll_sec = max(3, int(store.get("poll", 8)))
+    self.turn_ms = max(4, int(store.get("turn", 8))) * 1000
+    self.auto_pages = store.get("auto_pages", true)
+    self.page_secs = max(2, min(12, int(store.get("page_secs", 3))))
+    self.show_pips = store.get("show_pips", true)
+    self.page_started = now_ms()
+    self.style = store.get("style", "standard")
+    if self.style != "minimal" && self.style != "standard" && self.style != "expressive"
+      self.style = "standard"
+    end
+    self.page_fx = store.get("page_fx", "auto")
+    if self.page_fx != "auto" && self.page_fx != "off" && self.page_fx != "slide"
+      self.page_fx = "auto"
+    end
+    self.prev_page = -1
+    self.transition_started = -10000
+    self.transition_time = 450
+    self.printer_scene = store.get("printer_scene", true)
+    self.prep_sprites = store.get("prep_sprites", true)
+    # A 17-point original filament path: a vertical strand flowing from
+    # the nozzle, then curling into two short loops on the build plate.
+    # Prepared once; no fresh arrays allocated during draw().
+    self.extrude_x = [7,7,7,7,8,9,10,11,11,10,9,8,7,6,5,4,3]
+    self.extrude_y = [9,10,11,12,13,13,13,12,11,11,12,13,13,13,12,12,13]
+    # Original TC002 16x15 upright thermometer, inspired by the simple
+    # silhouette of traditional temperature icons. The Ecowitt example
+    # references external icon ID 68435, rather than supplying pixel art;
+    # this self-contained sprite needs no installed Hub icons.
+    # G=glass outline, l=mercury column, M=warm bulb, T=calibration tick.
+    # Row 15 is intentionally free for the preparation progress bar.
+    self.thermo_pixels = [
+      "......GGG.......",
+      ".....G...G......",
+      ".....G.l.G.T....",
+      ".....G.l.G......",
+      ".....G.l.G.T....",
+      ".....G.l.G......",
+      ".....G.l.G.T....",
+      ".....G.l.G......",
+      ".....G.l.G......",
+      "....GG.l.GG.....",
+      "...G..MMM..G....",
+      "..G..MMMMM..G...",
+      "..G..MMMMM..G...",
+      "...G..MMM..G....",
+      "....GGGGGGG....."
+    ]
+    # Original 15x15 caution triangle, styled for the TC002 matrix rather
+    # than depending on the external AWTRIX attention-4 icon. "R" is a strong
+    # red border, "b" dark burgundy fill, and "W" the white exclamation mark.
+    # The entire sprite stays in x=0..14 and y=0..14; x>=17 is text space.
+    self.warning_pixels = [
+      ".......R.......",
+      "......RRR......",
+      "......RbR......",
+      ".....RRbRR.....",
+      ".....RbbbR.....",
+      "....RRbbbRR....",
+      "....RbbWbbR....",
+      "...RRbbWbbRR...",
+      "...RRbbWbbRR...",
+      "..RRbbbWbbbRR..",
+      "..RRbbbbbbbRR..",
+      ".RRbbbbWbbbbRR.",
+      ".RRbbbbbbbbbRR.",
+      "RRRRRRRRRRRRRRR",
+      "RRRRRRRRRRRRRRR"
+    ]
+    self.demo = store.get("demo", false)
+    self.demo_state = store.get("demo_state", "printing")
+    self.bar = store.get("bar", true)
+    self.anim = store.get("anim", true)
+    self.glow_trail = max(3, min(18, int(store.get("glow_trail", 8))))
+    self.glow_speed = max(40, min(350, int(store.get("glow_speed", 110))))
+    self.correction = max(-10, min(10, int(store.get("correction", 0))))
+    self.prelayer_zero = store.get("prelayer_zero", true)
+    self.show_prep = store.get("show_prep", true)
+    self.console_stages = store.get("console_stages", true)
+    self.console_busy = false
+    self.console_time = 0
+    self.stage_tick = 0
+    self.probe_x = nil
+    self.probe_y = nil
+    self.probe_time = 0
+    self.display_busy = false
+    self.m117 = ""
+    self.m117_last = ""
+    self.phase_name = "PREPARING"
+    self.phase_detail = "Starting print"
+    self.phase_time = 0
+    self.phase_ttl = 0
+    self.phase_label = "PREPARING"
+    self.phase_sub = "Starting print"
+    self.tool_target = nil
+    self.bed_target = nil
+    self.notify_done = store.get("notify_done", false)
+    self.sound_done = store.get("sound_done", false)
+    self.notify_error = store.get("notify_error", false)
+    self.notify_pause = store.get("notify_pause", true)
+    self.sound_pause = store.get("sound_pause", false)
+    self.notify_first = store.get("notify_first", false)
+    self.notify_half = store.get("notify_half", false)
+    self.notify_ninety = store.get("notify_ninety", false)
+    self.sound_milestone = store.get("sound_milestone", false)
+    # The existing booleans remain master opt-ins, preserving v0.4.0 choices.
+    self.sound_error = store.get("sound_error", false)
+    self.done_audio = store.get("done_audio", "builtin")
+    self.done_audio_value = store.get("done_audio_value", "")
+    self.pause_audio = store.get("pause_audio", "builtin")
+    self.pause_audio_value = store.get("pause_audio_value", "")
+    self.runout_audio = store.get("runout_audio", "builtin")
+    self.runout_audio_value = store.get("runout_audio_value", "")
+    self.milestone_audio = store.get("milestone_audio", "builtin")
+    self.milestone_audio_value = store.get("milestone_audio_value", "")
+    self.error_audio = store.get("error_audio", "builtin")
+    self.error_audio_value = store.get("error_audio_value", "")
+    self.debug_audio = store.get("debug_audio", false)
+    self.eta_mode = store.get("eta_mode", "adaptive")
+    self.eta_debug = store.get("eta_debug", false)
+    self.reset_eta()
+    self.heat_progress = store.get("heat_progress", true)
+    self.show_material = store.get("show_material", true)
+    self.filament_units = store.get("filament_units", "meters")
+    self.filament_dia = max(1.0, min(3.0, num(store.get("filament_dia", 1.75))))
+    self.filament_density = max(0.70, min(2.00, num(store.get("filament_density", 1.24))))
+    # Remember the unit used on the last material-page visit. A script
+    # reload must not silently restart every alternate cycle in grams.
+    # Default true makes the first alternate visit show meters.
+    self.filament_alt_grams = store.get("filament_alt_grams_last", true)
+    self.notify_tool = store.get("notify_tool", false)
+    self.show_active_tool = store.get("show_active_tool", true)
+    self.tool_numbering = store.get("tool_numbering", "klipper")
+    self.demo_tool = store.get("demo_tool", "extruder2")
+    self.debug_tool = store.get("debug_tool", false)
+    self.tool_seen = false
+    self.tool_logged = false
+    self.active_tool_label = ""
+    self.alert_offline = store.get("alert_offline", false)
+    self.notify_offline = store.get("notify_offline", false)
+    self.prev_layer = nil
+    self.prev_pct = nil
+    self.prev_tool = nil
+    self.first_alerted = false
+    self.half_alerted = false
+    self.ninety_alerted = false
+    self.filament_used = nil
+    self.filament_total = nil
+    self.filament_weight_total = nil
+    self.tool_count = 0
+    self.material = ""
+    self.meta_materials = []
+    self.meta_tools = []
+    self.slot_materials = []
+    self.slot_subtypes = []
+    self.slot_supported = false
+    self.slot_busy = false
+    self.slot_last = 0
+    self.material_label = "MATERIAL --"
+    self.used_label = "USED --"
+    self.planned_label = ""
+    self.heat_bed_start = nil
+    self.heat_bed_goal = nil
+    self.heat_tool_start = nil
+    self.heat_tool_goal = nil
+    self.heat_pct = -1
+    self.capabilities_loaded = false
+    self.capabilities_busy = false
+    self.capability_tick = 0
+    self.sensor_list = []
+    self.sensor_index = 0
+    self.sensor_busy = false
+    self.sensor_prior = {}
+    self.sensor_loss_time = 0
+    self.pause_reason = ""
+    self.stats_message = ""
+    self.offline_failures = 0
+    self.offline = false
+    self.active_before_offline = false
+    self.last_state = "standby"
+    self.paused_at = 0
+    self.observed = false
+    self.in_flight = false
+    self.accent = store.get("accent", 0x33EE88)
+    self.tick = 0
+    self.page = 0
+    self.last_ok = 0
+    self.state = "standby"
+    self.filename = ""
+    self.file_label = "NO FILE"
+    self.layer = nil
+    self.total_layers = nil
+    self.pct = 0
+    self.elapsed = 0
+    self.total_est = -1
+    self.remaining = -1
+    self.tool = "extruder"
+    self.tool_temp = nil
+    self.bed_temp = nil
+
+    if self.demo
+      self.state = self.demo_state
+      if self.demo_state == "filament_out"
+        self.state = "paused"
+        self.pause_reason = "FILAMENT OUT"
+      end
+      if self.demo_state == "heating_bed" || self.demo_state == "heating_nozzle" || self.demo_state == "homing" || self.demo_state == "bed_mesh" || self.demo_state == "loading_filament" || self.demo_state == "priming"
+        self.state = "printing"
+        self.layer = 0
+      end
+      self.filename = "Example_Bracket.gcode"
+      self.file_label = self.display_filename(self.filename)
+      if self.layer == nil self.layer = 142 end
+      self.total_layers = 226
+      self.pct = 63
+      if self.state == "complete" self.pct = 100 end
+      self.elapsed = 7000
+      self.total_est = 12040
+      self.tool = self.demo_tool
+      self.tool_seen = true
+      self.tool_temp = 215
+      self.bed_temp = 60
+      self.tool_target = 215
+      self.bed_target = 60
+      self.material = "PLA"
+      self.slot_materials = ["PETG", "PETG", "PLA", "TPU"]
+      self.slot_subtypes = ["", "Support PETG", "", ""]
+      self.filament_used = 4790
+      self.filament_total = 7500
+      self.filament_weight_total = 22.4
+      self.tool_count = 4
+      self.heat_bed_start = 20
+      self.heat_bed_goal = 60
+      self.heat_tool_start = 25
+      self.heat_tool_goal = 215
+      if self.demo_state == "heating_bed"
+        self.bed_temp = 42
+      elif self.demo_state == "heating_nozzle"
+        self.tool_temp = 167
+      end
+    end
+    self.refresh_labels()
+  end
+
+  # ETA history is held in RAM for the active job, not persisted to flash.
+  # An app restart during a job simply begins estimating again from current data.
+  def reset_eta()
+    self.eta_file_fraction = 0.0
+    self.eta_start_elapsed = nil
+    self.eta_start_progress = 0.0
+    self.eta_start_seen = false
+    self.eta_smooth_work = nil
+    self.eta_smoothed = nil
+    self.eta_slicer_remaining = -1
+    self.eta_adaptive_remaining = -1
+    self.eta_source = "calculating"
+    self.eta_adjusted_progress = 0.0
+    self.eta_rate_time = nil
+    self.eta_rate_progress = 0.0
+    self.eta_rate = nil
+    self.eta_rate_samples = 0
+    self.eta_debug_tick = 0
+  end
+
+  def loop()
+    if !self.demo && self.host != ""
+      if self.tick <= 0 && !self.in_flight
+        self.in_flight = true
+        self.tick = self.poll_sec
+        http.get(self.base + "/printer/objects/query?print_stats&virtual_sdcard&toolhead",
+                 / body, status -> self.on_status(body, status))
+      end
+      self.tick -= 1
+      # Poll the lightweight console cache more frequently than the full
+      # printer status, so short U1 preparation stages are less likely missed.
+      if self.console_stages && self.is_preparing()
+        if self.stage_tick <= 0 && !self.console_busy
+          self.console_busy = true
+          self.stage_tick = 4
+          # A mesh can generate many probe responses. Read enough console
+          # history to retain action codes and individual probe results.
+          http.get(self.base + "/server/gcode_store?count=40",
+                   / body, status -> self.on_console(body, status), {"cap": 16384})
+        end
+        self.stage_tick -= 1
+      else
+        self.stage_tick = 0
+      end
+    end
+    self.refresh_labels()
+  end
+
+  # A damaged or truncated response should not stop the AWTRIX script.
+  def safe_json(body)
+    if body == nil return nil end
+    try
+      return json.load(body)
+    except .. as err, msg
+      return nil
+    end
+  end
+
+  def on_status(body, status)
+    self.in_flight = false
+    if body == nil || status != 200
+      self.on_failed_status()
+      return
+    end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map)
+      self.on_failed_status()
+      return
+    end
+    var result = doc.find("result")
+    if !isinstance(result, map)
+      self.on_failed_status()
+      return
+    end
+    var values = result.find("status")
+    if !isinstance(values, map)
+      self.on_failed_status()
+      return
+    end
+    var stats = values.find("print_stats")
+    if !isinstance(stats, map)
+      self.on_failed_status()
+      return
+    end
+
+    var st = stats.find("state")
+    if st == nil
+      self.on_failed_status()
+      return
+    end
+    self.offline_failures = 0
+    self.offline = false
+    if !self.capabilities_loaded && !self.capabilities_busy && self.capability_tick <= 0
+      self.capabilities_busy = true
+      self.capability_tick = 60
+      http.get(self.base + "/printer/objects/list", / body, status -> self.on_capabilities(body, status), {"cap": 16384})
+    end
+    self.capability_tick -= 1
+    # Only notify on a witnessed active -> terminal transition.
+    # Never replay a completed/failed print at startup or reconnect.
+    var previous_state = self.state
+    var old_pct = self.prev_pct
+    var old_layer = self.prev_layer
+    var old_tool = self.tool
+    var was_active = (self.state == "printing" || self.state == "paused") && (now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000))
+    if self.observed && was_active
+      if st == "complete" && self.notify_done
+        self.completion_alert()
+      elif st == "error" && self.notify_error
+        self.error_alert()
+      end
+    end
+    # A new print invalidates phase labels from the previous job.
+    if st == "printing" && self.state != "printing" && self.state != "paused"
+      self.filename = ""
+      self.file_label = "NO FILE"
+      self.total_est = -1
+      self.reset_eta()
+      self.filament_used = nil
+      self.filament_total = nil
+      self.filament_weight_total = nil
+      self.tool_count = 0
+      self.material = ""
+      self.meta_materials = []
+      self.meta_tools = []
+      self.phase_name = "PREPARING"
+      self.phase_detail = "Starting print"
+      self.phase_time = 0
+      self.console_time = 0
+      self.stage_tick = 0
+      self.probe_x = nil
+      self.probe_y = nil
+      self.probe_time = 0
+      self.m117 = ""
+      self.m117_last = ""
+      self.sensor_prior = {}
+      self.first_alerted = false
+      self.half_alerted = false
+      self.ninety_alerted = false
+      self.prev_pct = nil
+      self.prev_layer = nil
+      self.sensor_loss_time = 0
+      self.pause_reason = ""
+      self.heat_bed_start = nil
+      self.heat_bed_goal = nil
+      self.heat_tool_start = nil
+      self.heat_tool_goal = nil
+      self.tool_seen = false
+      self.tool_logged = false
+    end
+    # A pause must be witnessed. Never announce a pause on first connection.
+    if self.observed && previous_state == "printing" && st == "paused" && was_active
+      self.paused_at = now_ms()
+      self.pause_reason = self.infer_pause_reason(stats.find("message"))
+      if self.notify_pause self.pause_alert() end
+    end
+    self.observed = true
+    self.state = st
+    self.last_state = st
+    self.last_ok = now_ms()
+    if st != "printing" && st != "paused"
+      self.prev_pct = nil
+      self.prev_layer = nil
+      return
+    end
+    self.stats_message = stats.find("message")
+    if self.stats_message == nil self.stats_message = "" end
+    if st == "paused" self.pause_reason = self.infer_pause_reason(self.stats_message) end
+
+    var file = stats.find("filename")
+    if file != nil && file != self.filename
+      self.filename = file
+      self.file_label = self.display_filename(file)
+      self.total_est = -1
+      self.reset_eta()
+      self.filament_total = nil
+      self.filament_weight_total = nil
+      self.tool_count = 0
+      self.material = ""
+      self.meta_materials = []
+      self.meta_tools = []
+      self.get_metadata(file)
+    end
+
+    var duration = stats.find("print_duration")
+    if duration != nil self.elapsed = num(duration) end
+    var used = stats.find("filament_used")
+    if used != nil self.filament_used = num(used) end
+
+    var card = values.find("virtual_sdcard")
+    if isinstance(card, map)
+      var p = card.find("progress")
+      if p != nil
+        self.eta_file_fraction = max(0.0, min(1.0, num(p)))
+        # This is how much of the G-code FILE Klipper has read, not
+        # necessarily how much physical printing has happened.
+        var raw_pct = int(max(0, min(100, num(p) * 100 + 0.5)))
+        if raw_pct >= 100
+          self.pct = 100
+        else
+          self.pct = int(max(0, min(100, raw_pct + self.correction)))
+        end
+      end
+    end
+
+    self.layer = nil
+    self.total_layers = nil
+    var info = stats.find("info")
+    if isinstance(info, map)
+      self.layer = info.find("current_layer")
+      self.total_layers = info.find("total_layer")
+    end
+    # If we actually observe layer 0 -> layer 1, exclude the measured
+    # preparation time and startup G-code bytes from print-pace sampling.
+    # Do not assume this offset if we attach midway through an existing job.
+    if self.layer != nil && num(self.layer) > 0 && old_layer != nil && num(old_layer) <= 0 && !self.eta_start_seen && st == "printing"
+      self.eta_start_seen = true
+      self.eta_start_elapsed = self.elapsed
+      self.eta_start_progress = self.eta_file_fraction
+      self.eta_rate_time = nil
+      self.eta_rate = nil
+      self.eta_rate_samples = 0
+      self.eta_smoothed = nil
+      self.eta_smooth_work = nil
+    end
+    # When layer tracking is present and still at zero, the file
+    # percentage includes slicer start G-code (heating, calibration, etc.).
+    # Do not claim material has been printed just because bytes were read.
+    if self.prelayer_zero && self.layer != nil && self.total_layers != nil
+      if num(self.total_layers) > 0 && num(self.layer) <= 0
+        self.pct = 0
+      end
+    end
+
+    var head = values.find("toolhead")
+    if isinstance(head, map)
+      var candidate = head.find("extruder")
+      if type(candidate) == "string" && string.startswith(candidate, "extruder")
+        var changed = candidate != self.tool
+        self.tool_seen = true
+        if changed
+          self.tool = candidate
+          self.tool_temp = nil
+          self.tool_target = nil
+        end
+        if self.debug_tool && (changed || !self.tool_logged)
+          log("[KD TOOL] active=" + candidate + " display=" + self.compact_tool_name() + " state=" + st)
+          self.tool_logged = true
+        end
+      end
+    end
+
+    # Explicit first-layer and approximate file-progress milestones.
+    if st == "printing" && was_active && previous_state == "printing"
+      if self.notify_first && !self.first_alerted && old_layer != nil && self.layer != nil
+        if num(old_layer) < 2 && num(self.layer) >= 2
+          self.first_alerted = true
+          self.milestone_alert("FIRST LAYER DONE")
+        end
+      end
+      if self.notify_half && !self.half_alerted && old_pct != nil
+        if old_pct < 50 && self.pct >= 50
+          self.half_alerted = true
+          self.milestone_alert("PRINT 50%")
+        end
+      end
+      if self.notify_ninety && !self.ninety_alerted && old_pct != nil
+        if old_pct < 90 && self.pct >= 90
+          self.ninety_alerted = true
+          self.milestone_alert("PRINT 90%")
+        end
+      end
+      if self.notify_tool && old_tool != self.tool && old_tool != ""
+        notify({"text": "TOOL " + self.tool, "textColor": 0x66CCFF, "durationMs": 3500})
+      end
+    end
+    self.prev_layer = self.layer
+    self.prev_pct = self.pct
+    if size(self.sensor_list) > 0 && !self.sensor_busy
+      var sn = self.sensor_list[self.sensor_index]
+      self.sensor_index = (self.sensor_index + 1) % size(self.sensor_list)
+      self.sensor_busy = true
+      http.get(self.base + "/printer/objects/query?" + self.encode_name(sn),
+               / body, status -> self.on_sensor(sn, body, status))
+    end
+    # Temperature calls are separate: absent bed heaters do not break main status.
+    var active = self.tool
+    http.get(self.base + "/printer/objects/query?" + active + "=temperature,target",
+             / body, status -> self.on_tool_temperature(active, body, status))
+    http.get(self.base + "/printer/objects/query?heater_bed=temperature,target",
+             / body, status -> self.on_bed_temperature(body, status))
+    # U1 and compatible firmware may publish actual material loaded per head.
+    # Generic Klipper printers simply skip this optional request.
+    if self.show_material && self.slot_supported && !self.slot_busy
+      if self.slot_last == 0 || now_ms() - self.slot_last >= 30000
+        self.slot_last = now_ms()
+        self.slot_busy = true
+        http.get(self.base + "/printer/objects/query?print_task_config",
+                 / body, status -> self.on_slot_materials(body, status), {"cap": 8192})
+      end
+    end
+    if self.is_preparing()
+      if !self.display_busy
+        self.display_busy = true
+        http.get(self.base + "/printer/objects/query?display_status",
+                 / body, status -> self.on_display_status(body, status))
+      end
+    end
+    self.update_eta()
+    self.refresh_labels()
+  end
+
+  # Optional network monitoring only after an observed active print.
+  def on_failed_status()
+    if !self.alert_offline || self.demo return end
+    if self.state != "printing" && self.state != "paused" return end
+    if !self.observed return end
+    self.offline_failures += 1
+    if self.offline_failures >= 3 && !self.offline
+      self.offline = true
+      self.active_before_offline = true
+      if self.notify_offline
+        notify({"text": "PRINTER OFFLINE", "textColor": 0xFF6544, "durationMs": 7000})
+      end
+    end
+  end
+
+  # Discover only optional objects a particular Klipper printer actually has.
+  def on_capabilities(body, status)
+    self.capabilities_busy = false
+    if body == nil || status != 200 return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var r = doc.find("result")
+    if !isinstance(r, map) return end
+    var objects = r.find("objects")
+    if !isinstance(objects, list) return end
+    self.sensor_list = []
+    self.sensor_index = 0
+    for obj : objects
+      if type(obj) == "string"
+        if obj == "print_task_config" self.slot_supported = true end
+        if string.startswith(obj, "filament_switch_sensor ") || string.startswith(obj, "filament_motion_sensor ")
+          if size(self.sensor_list) < 6 self.sensor_list.push(obj) end
+        end
+      end
+    end
+    self.capabilities_loaded = true
+  end
+
+  # Optional Snapmaker U1 per-physical-head filament data, safely ignored
+  # when the object is absent. A slot's type can be PETG with subtype SUPPORT.
+  def on_slot_materials(body, status)
+    self.slot_busy = false
+    if body == nil || status != 200 return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var r = doc.find("result")
+    if !isinstance(r, map) return end
+    var values = r.find("status")
+    if !isinstance(values, map) return end
+    var cfg = values.find("print_task_config")
+    if !isinstance(cfg, map) return end
+    var types = cfg.find("filament_type")
+    if !isinstance(types, list) return end
+    self.slot_materials = types
+    var subtypes = cfg.find("filament_sub_type")
+    if isinstance(subtypes, list)
+      self.slot_subtypes = subtypes
+    else
+      self.slot_subtypes = []
+    end
+    self.refresh_labels()
+  end
+
+  def on_sensor(name, body, status)
+    self.sensor_busy = false
+    if body == nil || status != 200 return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var r = doc.find("result")
+    if !isinstance(r, map) return end
+    var values = r.find("status")
+    if !isinstance(values, map) return end
+    var sensor = values.find(name)
+    if !isinstance(sensor, map) return end
+    var detected = sensor.find("filament_detected")
+    var enabled = sensor.find("enabled")
+    if detected == nil || enabled != true return end
+    var earlier = self.sensor_prior.find(name)
+    # Sensors for UNUSED tools can be empty all the time. Only record a
+    # true-to-false transition witnessed while a print is running.
+    if earlier == true && detected == false && self.state == "printing"
+      self.sensor_loss_time = now_ms()
+    end
+    self.sensor_prior[name] = detected
+  end
+
+  # Do not infer 'runout' from a sensor that simply lacks loaded filament.
+  def infer_pause_reason(message)
+    if message != nil
+      if re.search("[Ff][Ii][Ll][Aa][Mm][Ee][Nn][Tt].*[Rr][Uu][Nn][Oo][Uu][Tt]|[Rr][Uu][Nn][Oo][Uu][Tt].*[Ff][Ii][Ll][Aa][Mm][Ee][Nn][Tt]", message) != nil
+        return "FILAMENT OUT"
+      end
+    end
+    if self.sensor_loss_time > 0 && now_ms() - self.sensor_loss_time < 30000
+      return "CHECK FILAMENT"
+    end
+    return "PRINT PAUSED"
+  end
+
+  # Debug logging runs only on audio events, never in draw()/poll loops.
+  # Logs describe the final outgoing sound type and the notify() result.
+  # The notify() result reports acceptance, not audible playback.
+  def audio_log(message)
+    if self.debug_audio
+      log("[KD AUDIO] " + message)
+    end
+  end
+
+  # Keep source selection behavior identical to v0.4.1. Record WHY a
+  # fallback happened; a valid saved name never deliberately falls back.
+  def selected_sound(source, value, builtin, event_name)
+    if source == "saved"
+      if type(value) == "string" && size(value) > 0 && size(value) <= 96
+        # A leading/trailing space caused an earlier melody lookup to fail.
+        # Normalize ordinary spaces before validating, without allowing paths.
+        var match = re.search("^ *([A-Za-z0-9_-]+) *$", value)
+        if match != nil
+          var cleaned = match[1]
+          if size(cleaned) <= 32
+            self.audio_log(event_name + " selected=file " + cleaned)
+            return {"file": cleaned}
+          end
+        end
+        self.audio_log(event_name + " fallback=bad_name")
+      else
+        self.audio_log(event_name + " fallback=empty_or_length")
+      end
+    elif source == "custom"
+      if type(value) == "string" && size(value) > 2 && size(value) <= 512
+        if re.search("^[A-Za-z0-9_-]+:[^:]*:.+$", value) != nil
+          self.audio_log(event_name + " selected=custom_rtttl bytes=" + str(size(value)))
+          return {"rtttl": value}
+        end
+        self.audio_log(event_name + " fallback=bad_rtttl_shape")
+      else
+        self.audio_log(event_name + " fallback=empty_or_length")
+      end
+    else
+      self.audio_log(event_name + " selected=builtin source=" + str(source))
+    end
+    if source == "saved" || source == "custom"
+      self.audio_log(event_name + " selected=builtin_fallback")
+    end
+    return {"rtttl": builtin}
+  end
+
+  def send_alert(event_name, payload)
+    if !self.debug_audio
+      notify(payload)
+      return
+    end
+    var audio = payload.find("sound")
+    if audio == nil
+      self.audio_log(event_name + " sound=disabled")
+    else
+      if isinstance(audio, map)
+        if audio.find("file") != nil
+          self.audio_log(event_name + " outgoing_file=" + str(audio.find("file")))
+        elif audio.find("rtttl") != nil
+          self.audio_log(event_name + " outgoing=RTTTL")
+        end
+      end
+    end
+    try
+      var accepted = notify(payload)
+      self.audio_log(event_name + " notify_accepted=" + str(accepted))
+    except .. as err, msg
+      self.audio_log(event_name + " notify_error=" + str(err) + ":" + str(msg))
+    end
+  end
+
+  def pause_alert()
+    var msg = self.pause_reason
+    if msg == "" msg = "PRINT PAUSED" end
+    var alert = {"text": msg, "textColor": 0xFFBC44, "durationMs": 6500}
+    if self.sound_pause
+      if msg == "FILAMENT OUT" || msg == "CHECK FILAMENT"
+        alert["sound"] = self.selected_sound(self.runout_audio, self.runout_audio_value,
+                         "runout:d=8,o=5,b=165:c6,p,a,p,c6", "runout")
+      else
+        alert["sound"] = self.selected_sound(self.pause_audio, self.pause_audio_value,
+                         "pause:d=8,o=5,b=150:g,p,e", "pause")
+      end
+    end
+    self.send_alert("pause", alert)
+  end
+
+  def milestone_alert(label)
+    var alert = {"text": label, "textColor": 0x66EABB, "durationMs": 4000}
+    if self.sound_milestone
+      alert["sound"] = self.selected_sound(self.milestone_audio, self.milestone_audio_value,
+                       "layer:d=16,o=5,b=180:c,e,g", "milestone")
+    end
+    self.send_alert("milestone", alert)
+  end
+
+  def completion_alert()
+    # Sound is an explicit opt-in. The default is a silent notification.
+    var payload = {"text": "PRINT DONE", "textColor": 0x44EE99,
+                   "durationMs": 8000, "progress": 100,
+                   "progressColor": 0x44EE99, "progressTrackColor": 0x14251B}
+    if self.sound_done
+      payload["sound"] = self.selected_sound(self.done_audio, self.done_audio_value,
+                         "done:d=8,o=5,b=180:c,e,g,4c6", "complete")
+    end
+    self.send_alert("complete", payload)
+  end
+
+  def error_alert()
+    var payload = {"text": "PRINT ERROR", "textColor": 0xFF5555,
+                   "durationMs": 10000}
+    if self.sound_error
+      payload["sound"] = self.selected_sound(self.error_audio, self.error_audio_value,
+                         "error:d=8,o=5,b=150:g4,p,e4,g4", "error")
+    end
+    self.send_alert("error", payload)
+  end
+
+  # For display ONLY: keep full original self.filename for all Moonraker APIs.
+  # The filename page does not need directory names or the .gcode extension.
+  # Generate this label only when the active file changes, not in draw().
+  def display_filename(value)
+    if type(value) != "string" || value == "" return "NO FILE" end
+    var short = value
+    var i = size(short) - 1
+    while i >= 0
+      if short[i] == "/" || short[i] == "\\"
+        short = short[i + 1..]
+        break
+      end
+      i -= 1
+    end
+    if size(short) > 6 && string.endswith(short, ".gcode", true)
+      short = short[0..-7]
+    end
+    if short == "" return "NO FILE" end
+    return short
+  end
+
+  # Encode the relative G-code path, including spaces, UTF-8 and folders.
+  def encode_name(value)
+    var encoded = ""
+    var i = 0
+    while i < size(value)
+      var c = value[i]
+      var b = string.byte(c)
+      if (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || c == "-" || c == "_" || c == "." || c == "~"
+        encoded += c
+      else
+        encoded += format("%%%02X", b)
+      end
+      i += 1
+    end
+    return encoded
+  end
+
+  def get_metadata(file)
+    if file == "" return end
+    http.get(self.base + "/server/files/metadata?filename=" + self.encode_name(file),
+             / body, status -> self.on_metadata(file, body, status),
+             {"cap": 8192})
+  end
+
+  def on_metadata(file, body, status)
+    if file != self.filename || body == nil || status != 200 return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var r = doc.find("result")
+    if !isinstance(r, map) return end
+    var n = r.find("estimated_time")
+    if n != nil self.total_est = num(n) end
+    n = r.find("filament_total")
+    if n != nil self.filament_total = num(n) end
+    n = r.find("filament_weight_total")
+    if n != nil && num(n) > 0 self.filament_weight_total = num(n) end
+    n = r.find("filament_type")
+    self.meta_materials = []
+    if isinstance(n, list)
+      self.meta_materials = n
+      self.material = ""
+    elif type(n) == "string"
+      self.material = n
+      # Some Moonraker slicers return a JSON-encoded list as a string.
+      if string.startswith(n, "[")
+        var parsed = self.safe_json(n)
+        if isinstance(parsed, list) self.meta_materials = parsed end
+      end
+      if size(self.meta_materials) == 0
+        self.meta_materials = string.split(string.replace(n, ";", ","), ",")
+      end
+    end
+    n = r.find("referenced_tools")
+    self.meta_tools = []
+    if isinstance(n, list)
+      self.meta_tools = n
+      self.tool_count = size(n)
+    end
+    self.update_eta()
+    self.refresh_labels()
+  end
+
+  def on_tool_temperature(active, body, status)
+    if active != self.tool || body == nil || status != 200 return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var r = doc.find("result")
+    if !isinstance(r, map) return end
+    var values = r.find("status")
+    if !isinstance(values, map) return end
+    var t = values.find(active)
+    if !isinstance(t, map) return end
+    var n = t.find("temperature")
+    if n != nil self.tool_temp = num(n) end
+    n = t.find("target")
+    if n != nil self.tool_target = num(n) end
+    if self.tool_target != nil && self.tool_temp != nil && self.state == "printing"
+      if self.tool_target >= 50 && self.tool_target - self.tool_temp > 4
+        if self.heat_tool_goal == nil || self.heat_tool_goal != self.tool_target
+          self.heat_tool_goal = self.tool_target
+          self.heat_tool_start = self.tool_temp
+        end
+      end
+    end
+    self.refresh_labels()
+  end
+
+  def on_bed_temperature(body, status)
+    if body == nil || status != 200 return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var r = doc.find("result")
+    if !isinstance(r, map) return end
+    var values = r.find("status")
+    if !isinstance(values, map) return end
+    var t = values.find("heater_bed")
+    if !isinstance(t, map) return end
+    var n = t.find("temperature")
+    if n != nil self.bed_temp = num(n) end
+    n = t.find("target")
+    if n != nil self.bed_target = num(n) end
+    if self.bed_target != nil && self.bed_temp != nil && self.state == "printing"
+      if self.bed_target >= 30 && self.bed_target - self.bed_temp > 3
+        if self.heat_bed_goal == nil || self.heat_bed_goal != self.bed_target
+          self.heat_bed_goal = self.bed_target
+          self.heat_bed_start = self.bed_temp
+        end
+      end
+    end
+    self.refresh_labels()
+  end
+
+  # Only use explicit layer tracking for the startup/printing transition.
+  # On printers that never report a layer, the normal progress view still works.
+  def is_preparing()
+    if !self.show_prep || self.state != "printing" return false end
+    if self.demo
+      return self.demo_state != "printing" && self.demo_state != "paused" && self.demo_state != "filament_out" && self.demo_state != "complete" && self.demo_state != "error"
+    end
+    if self.layer == nil return false end
+    # The timeout protects a printer whose slicer does not update CURRENT_LAYER.
+    return num(self.layer) <= 0 && self.elapsed < 1800
+  end
+
+  # Set a specific stage from fresh firmware / console messages.
+  def set_stage(label, details, seconds)
+    self.phase_name = label
+    self.phase_detail = details
+    self.phase_time = now_ms()
+    self.phase_ttl = seconds * 1000
+  end
+
+  # A Snapmaker mesh may last considerably longer than a single action
+  # message's nominal lifetime. Klipper prints probe positions during the
+  # actual operation; use them to refresh the stage. If BED_LEVELING was
+  # missed, movement across DIFFERENT XY points also identifies a mesh,
+  # whereas repeated probes at one XY are usually Z homing.
+  def note_probe(msg)
+    var m = re.search("probe at *([-0-9.]+), *([-0-9.]+)", msg)
+    if m == nil return false end
+    var x = num(m[1])
+    var y = num(m[2])
+    if x == nil || y == nil return true end
+    var now = now_ms()
+    if self.phase_name == "BED MESH"
+      self.set_stage("BED MESH", "Bed leveling", 240)
+    elif self.probe_x != nil && self.probe_y != nil && now - self.probe_time < 180000
+      if x - self.probe_x > 1 || self.probe_x - x > 1 || y - self.probe_y > 1 || self.probe_y - y > 1
+        self.set_stage("BED MESH", "Bed leveling", 240)
+      end
+    end
+    self.probe_x = x
+    self.probe_y = y
+    self.probe_time = now
+    return true
+  end
+
+  def stage_from_console(msg)
+    if re.search("PRINT_SWITCH_CHECKING", msg) != nil
+      self.set_stage("CHECK TOOLS", "Checking tools", 45)
+    elif re.search("PRINT_AUTO_FEEDING|PRINT_REPLENISHING", msg) != nil
+      self.set_stage("LOAD FILAMENT", "Loading filament", 140)
+    elif re.search("PRINT_BED_DETECTING", msg) != nil
+      self.set_stage("BED CHECK", "Inspecting bed", 100)
+    elif re.search("DETECT_PLATE", msg) != nil
+      self.set_stage("BED CHECK", "Detecting plate", 90)
+    elif re.search("BED_PREHEATING", msg) != nil
+      self.set_stage("HEAT SOAK", "Soaking bed", 240)
+    elif re.search("BED_PRESCANNING", msg) != nil
+      self.set_stage("BED MESH", "Checking mesh", 120)
+    elif re.search("BED_LEVELING", msg) != nil
+      self.set_stage("BED MESH", "Bed leveling", 240)
+    elif re.search("PRINT_PREEXTRUDING", msg) != nil
+      self.set_stage("PRIMING", "Priming nozzle", 90)
+    elif re.search("PRINT_RESUMING", msg) != nil
+      self.set_stage("RESUMING", "Resuming print", 35)
+    elif re.search("trigger_mcu_pos", msg) != nil
+      self.set_stage("HOMING", "Homing X/Y", 60)
+    elif re.search("z offset:", msg) != nil
+      # This message also occurs inside U1 bed-mesh sequences; don't
+      # prematurely replace a known active BED MESH with PROBING Z.
+      if self.phase_name != "BED MESH"
+        self.set_stage("PROBING Z", "Probing Z", 60)
+      end
+    elif re.search("measure k:", msg) != nil
+      self.set_stage("FLOW CAL", "Calibrating flow", 65)
+    else
+      self.note_probe(msg)
+    end
+  end
+
+  def on_console(body, status)
+    self.console_busy = false
+    if body == nil || status != 200 || !self.is_preparing() return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var result = doc.find("result")
+    if !isinstance(result, map) return end
+    var entries = result.find("gcode_store")
+    if !isinstance(entries, list) return end
+    var newest = self.console_time
+    # Records are oldest to newest. Ignore stale responses left over
+    # from a previous print (or from before this script was loaded).
+    var cutoff = epoch_ms() / 1000 - 120
+    for item : entries
+      if isinstance(item, map)
+        var ts = item.find("time")
+        var msg = item.find("message")
+        var kind = item.find("type")
+        if ts != nil && msg != nil
+          var stamp = num(ts)
+          if stamp > self.console_time && stamp >= cutoff
+            if kind == "response" self.stage_from_console(msg) end
+          end
+          if stamp > newest newest = stamp end
+        end
+      end
+    end
+    self.console_time = newest
+  end
+
+  def on_display_status(body, status)
+    self.display_busy = false
+    if body == nil || status != 200 || !self.is_preparing() return end
+    var doc = self.safe_json(body)
+    if !isinstance(doc, map) return end
+    var result = doc.find("result")
+    if !isinstance(result, map) return end
+    var values = result.find("status")
+    if !isinstance(values, map) return end
+    var ds = values.find("display_status")
+    if !isinstance(ds, map) return end
+    var msg = ds.find("message")
+    if msg != nil && msg != "" && msg != self.m117_last
+      self.m117 = msg
+    end
+    if msg != nil self.m117_last = msg end
+  end
+
+  # Favor reliable action codes; otherwise choose a real heater target and
+  # temperature, then M117, then a generic label. No invented stage timers.
+  def update_stage_labels()
+    self.phase_label = "PREPARING"
+    self.phase_sub = "Starting print"
+    if self.demo
+      if self.demo_state == "heating_bed"
+        self.phase_label = "HEATING BED"
+        self.phase_sub = "B 42/60C"
+      elif self.demo_state == "heating_nozzle"
+        self.phase_label = "HEAT NOZZLE"
+        self.phase_sub = "T 167/215C"
+      elif self.demo_state == "homing"
+        self.phase_label = "HOMING"
+        self.phase_sub = "Homing axes"
+      elif self.demo_state == "bed_mesh"
+        self.phase_label = "BED MESH"
+        self.phase_sub = "Bed leveling"
+      elif self.demo_state == "loading_filament"
+        self.phase_label = "LOAD FILAMENT"
+        self.phase_sub = "Loading filament"
+      elif self.demo_state == "priming"
+        self.phase_label = "PRIMING"
+        self.phase_sub = "Priming nozzle"
+      end
+      return
+    end
+    # BED_LEVELING/BED_PRESCANNING are BEGIN signals, not timers.
+    # Keep showing mesh while layer 0 is active until a subsequent
+    # recognized stage (or layer 1) takes over. Recent probe output
+    # refreshes the timestamp; a generous watchdog prevents showing an
+    # ancient mesh indefinitely if console events stop arriving.
+    if self.phase_name == "BED MESH" && self.phase_time > 0
+      if now_ms() - self.phase_time < 720000
+        self.phase_label = "BED MESH"
+        self.phase_sub = self.phase_detail
+        return
+      end
+    end
+    if self.phase_time > 0 && now_ms() - self.phase_time <= self.phase_ttl
+      self.phase_label = self.phase_name
+      self.phase_sub = self.phase_detail
+      return
+    end
+    if self.bed_target != nil && self.bed_temp != nil
+      if self.bed_target >= 30 && self.bed_target - self.bed_temp >= 3
+        self.phase_label = "HEATING BED"
+        self.phase_sub = format("B %d/%dC", int(self.bed_temp+0.5), int(self.bed_target+0.5))
+        return
+      end
+    end
+    if self.tool_target != nil && self.tool_temp != nil
+      if self.tool_target >= 50 && (self.tool_target - self.tool_temp >= 4 || self.tool_temp - self.tool_target >= 4)
+        self.phase_label = "NOZZLE TEMP"
+        self.phase_sub = format("T %d/%dC", int(self.tool_temp+0.5), int(self.tool_target+0.5))
+        return
+      end
+    end
+    if self.m117 != ""
+      self.phase_label = "PREPARING"
+      self.phase_sub = self.m117
+      return
+    end
+    # Unknown startup work is not necessarily waiting for a layer. In
+    # particular, do not claim that bed leveling has finished solely
+    # because a stage message got old.
+    self.phase_sub = "Finishing setup"
+  end
+
+  # Shared progress/indeterminate renderer. Both paths use the *same*
+  # gradient shape, speed, trail length, 16x subpixel phase and edge fade.
+  # During preparation there is no meaningful print percentage, so sweep
+  # over all 52 columns; during printing, stay within the lit percentage.
+  def draw_comet_bar(pct, ink, indeterminate)
+    if !self.bar return end
+    var rr = (ink >> 16) & 255
+    var gg = (ink >> 8) & 255
+    var bb = ink & 255
+    var animate = self.style != "minimal" && self.anim && self.state == "printing" && (indeterminate || pct > 0)
+    var base_r = rr
+    var base_g = gg
+    var base_b = bb
+    if animate
+      base_r = int(rr * 35 / 100)
+      base_g = int(gg * 35 / 100)
+      base_b = int(bb * 35 / 100)
+    end
+
+    if indeterminate
+      # A preparation sweep is a *busy indicator*, never a 100% bar.
+      # Without animation, leave only a subtle neutral track.
+      if animate
+        line(0, height()-1, width()-1, height()-1, rgb(base_r, base_g, base_b))
+      else
+        line(0, height()-1, width()-1, height()-1, 0x18232C)
+      end
+    else
+      # Retain exact v0.3.4 printing bar appearance and percent tracking.
+      progress(pct, rgb(base_r, base_g, base_b), 0x162126)
+    end
+    if !animate return end
+
+    var lit = width()
+    if !indeterminate lit = int(width() * pct / 100) end
+    if lit <= 0 return end
+    var trail16 = self.glow_trail * 16
+    var cycle_ms = (lit + self.glow_trail + 2) * self.glow_speed
+    var head16 = int((now_ms() % cycle_ms) * 16 / self.glow_speed) - 16
+    var tip_r = min(255, int(rr / 4) + 188)
+    var tip_g = min(255, int(gg / 4) + 188)
+    var tip_b = min(255, int(bb / 4) + 188)
+    var x = 0
+    while x < lit
+      var distance16 = head16 - (x * 16)
+      var strength = 0
+      if distance16 >= -16 && distance16 < 0
+        strength = (distance16 + 16) * 255 / 16
+      elif distance16 >= 0 && distance16 < trail16
+        strength = (trail16 - distance16) * 255 / trail16
+      end
+      if strength > 0
+        pixel(x, height() - 1,
+              rgb(base_r + int((tip_r - base_r) * strength / 255),
+                  base_g + int((tip_g - base_g) * strength / 255),
+                  base_b + int((tip_b - base_b) * strength / 255)))
+      end
+      x += 1
+    end
+  end
+
+  # Measure progress from initial temperature to target. Reset when target
+  # changes; do not present an invented heating percentage for homing/mesh.
+  def heating_percent()
+    if !self.heat_progress return -1 end
+    var start = nil
+    var actual = nil
+    var goal = nil
+    if self.phase_label == "HEATING BED"
+      start = self.heat_bed_start
+      actual = self.bed_temp
+      goal = self.bed_target
+    elif self.phase_label == "HEAT NOZZLE" || self.phase_label == "NOZZLE TEMP"
+      start = self.heat_tool_start
+      actual = self.tool_temp
+      goal = self.tool_target
+    else
+      return -1
+    end
+    if start == nil || actual == nil || goal == nil return -1 end
+    if num(goal) <= num(start) + 2 return -1 end
+    var fraction = int(100 * (num(actual) - num(start)) / (num(goal) - num(start)))
+    return int(max(0, min(100, fraction)))
+  end
+
+  # Compact procedural art, drawn entirely within x=0..14, y=0..14.
+  # Row 15 remains reserved for the regular progress/busy indicator.
+  # Easing/color shimmer follows the attached BeautifulWeather techniques,
+  # but all sprites are original and no lists/strings are built per frame.
+  def draw_prep_art(color)
+    var phase = self.phase_label
+    var t = now_ms()
+    if phase == "HEATING BED" || phase == "HEAT SOAK"
+      self.draw_bed_heating_art(t)
+    elif phase == "HEAT NOZZLE" || phase == "NOZZLE TEMP"
+      self.draw_thermometer_art(t, color)
+    elif phase == "HOMING" || phase == "PROBING Z"
+      self.draw_homing_art(t, color, phase == "PROBING Z")
+    elif phase == "BED MESH" || phase == "PROBING" || phase == "LEVELING"
+      # Keep the proven v0.6.0 bed-mesh art exactly as it was.
+      var step = int(t / 220) % 9
+      var i = 0
+      while i < 9
+        var x = 2 + (i % 3) * 4
+        var y = 2 + int(i / 3) * 4
+        var c = i == step ? 0xF9F8DD : (i < step ? 0x37D6B5 : 0x25445B)
+        rect_fill(x, y, 2, 2, c)
+        i += 1
+      end
+    elif phase == "PRIMING" || phase == "FLOW CAL"
+      self.draw_priming_art(t, color)
+    elif phase == "LOAD FILAMENT"
+      self.draw_loading_art(t, color)
+    else
+      # Universal busy spinner for unknown stages.
+      circle(7, 7, 5, 0x284253)
+      var step = int(t / 140) % 8
+      var sx = 7
+      var sy = 2
+      if step == 1 sx = 10 sy = 4
+      elif step == 2 sx = 12 sy = 7
+      elif step == 3 sx = 10 sy = 10
+      elif step == 4 sx = 7 sy = 12
+      elif step == 5 sx = 4 sy = 10
+      elif step == 6 sx = 2 sy = 7
+      elif step == 7 sx = 4 sy = 4
+      end
+      pixel(sx, sy, color)
+    end
+  end
+
+  # Heated print bed: a broad glowing plate, two support legs and three
+  # rising heat plumes. A bed heater is not a thermometer, so give it a
+  # silhouette that visually matches the BED HEAT label.
+  def draw_bed_heating_art(t)
+    # Base and hot build surface sit well above the global progress row 15.
+    rect_fill(1, 11, 13, 1, 0xB6C9D7)
+    rect_fill(2, 12, 11, 1, 0xF9853C)
+    rect_fill(3, 13, 9, 1, 0x665347)
+    pixel(3, 14, 0x8A9BAC)
+    pixel(11, 14, 0x8A9BAC)
+    # Three compact, ascending S-shaped heat waves. Their bright points
+    # move upward independently; no arbitrary heating percent is implied.
+    var n = 0
+    while n < 3
+      var x = 3 + n * 4
+      var y = 3
+      while y <= 9
+        var xx = x + (y % 3 == 0 ? 1 : 0)
+        pixel(xx, y, 0x6A3322)
+        y += 1
+      end
+      var phase = int(t / (210 + n * 25)) + n * 2
+      var yy = 9 - (phase % 7)
+      pixel(x + (yy % 3 == 0 ? 1 : 0), yy, 0xFFD07A)
+      if yy < 9
+        pixel(x + ((yy + 1) % 3 == 0 ? 1 : 0), yy + 1, 0xFA823B)
+      end
+      n += 1
+    end
+    # Gentle glow on the upper plate, brightest while the heat wave passes.
+    if int(t / 400) % 2 == 0
+      rect_fill(3, 10, 9, 1, 0xB34E28)
+    end
+  end
+
+  # Classic vertical thermometer: a narrow, straight glass column rises
+  # from a large round bulb, with three detached tick marks on the right.
+  # This is legible even at 52x16 on the TC002. The bulb stays warm and the
+  # liquid climbs from bottom to top based on real, measured heater progress.
+  # Preview mode only sweeps the fill when no measurements are available.
+  def draw_thermometer_art(t, color)
+    var warm = self.heating_percent()
+    if warm < 0 && self.demo
+      warm = int((t % 9000) / 90)
+    end
+    var y = 0
+    while y < 15
+      var row = self.thermo_pixels[y]
+      var x = 0
+      while x < 16
+        var k = row[x]
+        var ink = 0
+        if k == "G"
+          # Warm white glass, slightly dimmer on the right edge.
+          ink = x >= 9 ? 0x8FB8CF : 0xCAE6F4
+        elif k == "T"
+          ink = 0x7C91A4
+        elif k == "M"
+          # The bulb has a lit orange center with a pale glint.
+          ink = 0xFF792F
+          if x == 6 && y == 11 ink = 0xFFF0B4 end
+          if x == 7 && y == 12 ink = 0xFFBA4F end
+        elif k == "l"
+          # Dark empty glass above the liquid. At the target the column
+          # fills to the cap; no fake progress for unmeasured real stages.
+          var threshold = int((8 - y) * 100 / 7)
+          ink = warm >= threshold ? 0xFF8D38 : 0x203442
+        end
+        if k != "." pixel(x, y, ink) end
+        x += 1
+      end
+      y += 1
+    end
+  end
+
+  # Homing uses the SAME original enclosed-printer silhouette as the
+  # expressive PRINTING page: sturdy side posts, X rail, moving carriage,
+  # brass nozzle, raised build plate, and an understated status LED.
+  # Unlike PRINTING, the plate is empty, the head seeks the home switch,
+  # then briefly backs away and holds. Positions are illustrative: no
+  # Klipper machine_coordinates are inferred from stage messages.
+  # A Z-probe stage uses the same artwork with a short vertical probe cycle.
+  # Completely procedural; no external Hub icon or per-frame allocations.
+  def draw_homing_art(t, color, probing)
+    # Original shared visual language of draw_printer_scene(oy), at oy=0.
+    rect_fill(1, 0, 14, 1, 0x9AB4C7)
+    pixel(2, 0, 0xD8EBF4)
+    rect_fill(1, 1, 1, 12, 0x70899E)
+    rect_fill(14, 1, 1, 12, 0x70899E)
+    rect_fill(2, 1, 12, 1, 0x24394B)
+    rect_fill(2, 3, 12, 1, 0x526F84)
+    pixel(12, 3, 0xA9C5D7)
+    rect_fill(2, 12, 12, 1, 0xB4C8D3)
+    rect_fill(2, 13, 12, 1, 0x395161)
+    rect_fill(1, 14, 14, 1, 0x70899D)
+    pixel(4, 13, 0x536C7C)
+    pixel(11, 13, 0x536C7C)
+
+    # The X/Y-home illustration seeks to the LEFT; a pause and brief
+    # back-off make the motion feel purposeful, rather than oscillating.
+    # PROBING Z keeps the carriage centered while a separate tip descends.
+    var center = 7
+    var arrived = false
+    var a = 0.0
+    if !probing
+      var clock = t % 3250
+      if clock < 1750
+        a = clamp(clock / 1750.0, 0.0, 1.0)
+        var e = a * a * (3.0 - 2.0 * a)
+        center = 11 - int(7 * e + 0.5)
+      elif clock < 2200
+        center = 4
+      elif clock < 2730
+        # Gently back off from the switch, as a printer does when homing.
+        a = clamp((clock - 2200) / 530.0, 0.0, 1.0)
+        center = 4 + int(3 * a * a * (3.0 - 2.0 * a) + 0.5)
+      end
+      arrived = clock >= 1650 && clock < 2450
+    end
+
+    # No blinking endstop pixels: those looked like stray LEDs beside the
+    # carriage on the real TC002. Instead, draw one recognizable check below.
+
+    # Carriage and filament nozzle reuse the printer-page's proportions
+    # and palette; center ranges 4..11, so all x coordinates remain 0..15.
+    rect_fill(center, 4, 1, 1, 0x3D6377)
+    rect_fill(center - 2, 5, 5, 2, 0x90AABF)
+    rect_fill(center - 1, 5, 3, 1, 0xD9E8F2)
+    rect_fill(center - 1, 7, 3, 1, 0xA48B65)
+    pixel(center, 8, 0xFFD58B)
+    if probing
+      # Indeterminate *illustration* of Z probe approach/retract.
+      var p = int((t % 1800) / 250)
+      if p > 4 p = 8 - p end
+      var travel = clamp(p, 0, 3)
+      var y = 9
+      while y <= 9 + travel
+        pixel(center, y, y == 9 + travel ? 0xF4FADF : 0x58BBD9)
+        y += 1
+      end
+      if travel == 3 pixel(center, 12, 0xFFF0A0) end
+    else
+      # A SINGLE, steady 6x5 green checkmark in the vacant right half of
+      # the printer enclosure, visible only during the illustrative contact.
+      # Draw both strokes two pixels thick for visibility on a real LED panel.
+      # The animation is illustrative and does not assert real XYZ homing.
+      if arrived
+        pixel(8, 8, 0x5DF5AD)
+        pixel(8, 9, 0x5DF5AD)
+        pixel(9, 9, 0x5DF5AD)
+        pixel(9, 10, 0x5DF5AD)
+        pixel(10, 10, 0xD9FFE8)
+        pixel(10, 11, 0xD9FFE8)
+        pixel(11, 9, 0x5DF5AD)
+        pixel(11, 10, 0x5DF5AD)
+        pixel(12, 8, 0x5DF5AD)
+        pixel(12, 9, 0x5DF5AD)
+        pixel(13, 7, 0x5DF5AD)
+        pixel(13, 8, 0x5DF5AD)
+      end
+    end
+    # The enclosure status LED is no longer used as a separate arrival flash.
+    pixel(13, 1, 0x348BA6)
+  end
+
+  # A moving strand *exits* the nozzle, curls to one side, and deposits
+  # a small loop on the plate. This is a cyclic extrusion illustration,
+  # never a measured G-code extrusion rate or another progress bar.
+  def draw_priming_art(t, color)
+    # Toolhead: cold gray cartridge, warm brass funnel and pointed nozzle.
+    rect_fill(3, 1, 9, 2, 0xA0BDCE)
+    rect_fill(2, 3, 11, 3, 0x506A7E)
+    rect_fill(4, 4, 7, 1, 0xC0D9E6)
+    rect_fill(5, 6, 5, 2, 0x7D96A5)
+    rect_fill(6, 8, 3, 1, 0xD8AB69)
+    pixel(7, 9, 0xFFDDA0)
+    # Thin plate intentionally lacks a filled bar above it.
+    rect_fill(1, 14, 13, 1, 0x2C4358)
+    var n = int((t % 3100) / 170)
+    if n > size(self.extrude_x) n = size(self.extrude_x) end
+    var i = 0
+    while i < n
+      var x = self.extrude_x[i]
+      var y = self.extrude_y[i]
+      # Bright extrusion front and dim deposited tail make flow visible.
+      pixel(x, y, i == n - 1 ? 0xF2FFDE : (i >= n - 4 ? color : 0x2D9873))
+      i += 1
+    end
+    # Heat at the tip pulses while filament is emerging.
+    if n > 0 && int(t / 220) % 2 == 0 pixel(8, 9, 0xFFB858) end
+  end
+
+  # Loading is different from priming: a moving filament enters a feeder,
+  # and no filament is shown being deposited on the build plate.
+  def draw_loading_art(t, color)
+    # Feeder wheel and hub.
+    circle(4, 5, 3, 0x819CAE)
+    circle_fill(4, 5, 1, 0xD9EAF2)
+    pixel(4, 2, 0x486174)
+    # Filament snakes in from above, alternating bright/dim sections.
+    var offset = int(t / 170) % 4
+    var y = 0
+    while y <= 11
+      pixel(9, y, (y + offset) % 4 <= 1 ? color : 0x24483F)
+      y += 1
+    end
+    rect_fill(7, 5, 5, 4, 0x5A758A)
+    rect_fill(8, 5, 3, 1, 0xA9C3D0)
+    rect_fill(8, 9, 3, 2, 0xC4A46C)
+    pixel(9, 11, color)
+    rect_fill(2, 13, 11, 1, 0x304354)
+  end
+
+  # Small original nozzle sprite for procedural scenes. Rectangular runs
+  # use firmware primitives rather than expensive per-pixel image decoding.
+  def draw_nozzle_mini(x, y, ink)
+    rect_fill(x + 3, y, 8, 2, 0xB8D2E4)
+    rect_fill(x + 2, y + 2, 10, 3, 0x536779)
+    rect_fill(x + 3, y + 3, 8, 1, 0xD0ECFA)
+    rect_fill(x + 4, y + 5, 6, 2, 0x99AFC4)
+    rect_fill(x + 5, y + 7, 4, 2, 0xD0B57A)
+    rect_fill(x + 6, y + 9, 2, 1, ink)
+  end
+
+  # Original 16x15 miniature enclosed printer, informed by the readable
+  # silhouettes of common FDM-printer pixel art. No external icon assets.
+  # Its workpiece height follows the *actual* file-progress percent, while
+  # moving carriage, nozzle glint and deposition highlights are decorative.
+  # All art stays in x=0..15; x>=18 contains real Klipper status text.
+  # oy is the page-slide vertical offset; pixels outside the panel clip.
+  def draw_printer_scene(oy)
+    var t = now_ms()
+    var pct = clamp(self.pct, 0, 100)
+    var h = 1 + int(pct * 4 / 100)
+    var top = 12 - h
+    var ny = top - 1
+    var cy = ny - 3
+    var center = 7 + int(2.4 * math.sin(t / 650.0))
+    var paused = self.state == "paused"
+    if paused center = 7 end
+    # Housing: top rail, side posts, glass frame and heavy print-bed plinth.
+    rect_fill(1, oy + 0, 14, 1, 0x9AB4C7)
+    pixel(2, oy + 0, 0xD8EBF4)
+    rect_fill(1, oy + 1, 1, 12, 0x70899E)
+    rect_fill(14, oy + 1, 1, 12, 0x70899E)
+    rect_fill(2, oy + 1, 12, 1, 0x24394B)
+    # Horizontal X-axis guide, with understated blue highlights.
+    rect_fill(2, oy + 3, 12, 1, 0x526F84)
+    pixel(3, oy + 3, 0xA9C5D7)
+    pixel(12, oy + 3, 0xA9C5D7)
+    # Build plate and rigid stand; these remain clearly distinct from the
+    # live full-width progress bar at y=15.
+    rect_fill(2, oy + 12, 12, 1, 0xB4C8D3)
+    rect_fill(2, oy + 13, 12, 1, 0x395161)
+    rect_fill(1, oy + 14, 14, 1, 0x70899D)
+    rect_fill(4, oy + 13, 2, 1, 0x536C7C)
+    rect_fill(10, oy + 13, 2, 1, 0x536C7C)
+    # A layered block grows ONLY when real printer progress changes. It does
+    # not represent a second independent progress animation.
+    rect_fill(5, oy + top, 6, h, 0x238578)
+    rect_fill(5, oy + top, 5, 1, self.accent)
+    if h > 1 rect_fill(10, oy + top + 1, 1, h - 1, 0x16525D) end
+    var yy = top + 1
+    while yy <= 11
+      if (yy - top) % 2 == 0
+        rect_fill(6, oy + yy, 3, 1, 0x4EB6A2)
+      else
+        pixel(9, oy + yy, 0x2D9B8C)
+      end
+      yy += 1
+    end
+    # X-carriage follows the gantry; as the object rises, the nozzle rises.
+    if cy > 4
+      rect_fill(center, oy + 4, 1, cy - 4, 0x3D6377)
+    end
+    rect_fill(center - 2, oy + cy, 5, 2, 0x90AABF)
+    rect_fill(center - 1, oy + cy, 3, 1, 0xD9E8F2)
+    rect_fill(center - 1, oy + cy + 2, 3, 1, 0xA48B65)
+    pixel(center, oy + ny, 0xFFD58B)
+    # Filament glint follows the toolhead, without implying measured
+    # extrusion flow. It freezes when paused.
+    if !paused && int(t / 145) % 3 != 0
+      pixel(center, oy + top, 0xE7FFCA)
+    end
+    # Tiny status LED; not a flashing alert.
+    pixel(13, oy + 1, paused ? 0xD08A2C : 0x34CC86)
+    var label = self.layer_label
+    if text_ink_width(label) > width() - 18 label = "PRINTING" end
+    text(18, oy + 6, label, 0x60CDFF)
+    var eta = self.eta_label
+    if text_ink_width(eta) > width() - 18 eta = self.pct_label end
+    text(18, oy + 14, eta, paused ? 0xFFB000 : 0xFFC050)
+  end
+
+  def draw_preparation()
+    self.update_stage_labels()
+    var head_color = 0xFFC050
+    if self.phase_label == "HOMING" || self.phase_label == "PROBING Z" || self.phase_label == "BED MESH"
+      head_color = 0x54CFFF
+    elif self.phase_label == "PRIMING" || self.phase_label == "FLOW CAL"
+      head_color = 0x4BEEA0
+    end
+    if self.style == "expressive" && self.prep_sprites
+      var name = self.phase_label
+      if name == "HEATING BED" name = "BED HEAT"
+      elif name == "HEAT NOZZLE" || name == "NOZZLE TEMP" name = "NOZZLE"
+      elif name == "LOAD FILAMENT" name = "LOADING"
+      elif name == "BED MESH" name = "MESH"
+      elif name == "PROBING Z" name = "PROBING"
+      end
+      self.draw_prep_art(head_color)
+      if text_ink_width(name) > width() - 16
+        scroll_text(16, 6, width() - 16, name, head_color)
+      else
+        text(16, 6, name, head_color)
+      end
+      if text_ink_width(self.phase_sub) > width() - 16
+        scroll_text(16, 14, width() - 16, self.phase_sub, 0xFFF0DC)
+      else
+        text(16, 14, self.phase_sub, 0xFFF0DC)
+      end
+      var warmup = self.heating_percent()
+      if warmup >= 0 self.draw_comet_bar(warmup, head_color, false)
+      else self.draw_comet_bar(0, head_color, true) end
+      return
+    end
+    if text_ink_width(self.phase_label) > width()
+      scroll_text(0, 6, width(), self.phase_label, head_color)
+    else
+      text(0, 6, self.phase_label, head_color)
+    end
+    if text_ink_width(self.phase_sub) > width()
+      scroll_text(0, 14, width(), self.phase_sub, 0xFFF0DC)
+    else
+      text(0, 14, self.phase_sub, 0xFFF0DC)
+    end
+    # Only heat stages have a meaningful completion fraction. Keep all
+    # other preparation stages as an indeterminate full-width sweep.
+    var warmup = self.heating_percent()
+    if warmup >= 0
+      self.draw_comet_bar(warmup, head_color, false)
+    else
+      self.draw_comet_bar(0, head_color, true)
+    end
+  end
+
+  # Calculate remaining-time candidates only from real printer status.
+  # print_duration excludes PAUSE (Moonraker); using it also prevents the
+  # smoothed countdown from advancing during a paused print.
+  # Slicer ETA is the conservative baseline. Adaptive only trusts file-pace
+  # samples after enough time/progress has accumulated, and never uses the
+  # display's manual percentage correction or raw layer fraction as time.
+  def update_eta()
+    if self.demo return end
+    if self.state != "printing" return end
+    if self.layer != nil && num(self.layer) <= 0
+      self.eta_source = "preparing"
+      return
+    end
+    var work = max(0.0, self.elapsed)
+    var pct = max(0.0, min(1.0, self.eta_file_fraction))
+    if self.eta_start_seen && self.eta_start_elapsed != nil
+      work = max(0.0, self.elapsed - self.eta_start_elapsed)
+      var usable = 1.0 - self.eta_start_progress
+      if usable > 0.02
+        pct = max(0.0, min(1.0, (pct - self.eta_start_progress) / usable))
+      end
+    end
+    self.eta_adjusted_progress = pct
+
+    # Metadata time is most useful for whole-print geometry and toolpaths.
+    # Exclude preparation only when we observed the first-layer transition.
+    var slicer = -1
+    if self.total_est > 0
+      slicer = max(0.0, self.total_est - work)
+    end
+    self.eta_slicer_remaining = slicer
+
+    # Mean observed print pace. G-code bytes aren't time-linear, especially
+    # for dense infill, travel, tool changes or small top layers.
+    var observed = -1
+    if pct >= 0.10 && pct < 0.995 && work >= 180
+      observed = work * (1.0 - pct) / pct
+    end
+
+    # An additional long-window velocity estimate (>= 45 print seconds).
+    # Use it only as a small modifier of the cumulative estimate.
+    if self.eta_rate_time == nil
+      self.eta_rate_time = work
+      self.eta_rate_progress = pct
+    else
+      var dt = work - self.eta_rate_time
+      var dp = pct - self.eta_rate_progress
+      if dt < -1
+        self.reset_eta()
+        return
+      end
+      if dt >= 45
+        if dp >= 0.001 && dp < 0.35 && pct >= 0.10
+          var sample = dp / dt
+          if self.eta_rate == nil
+            self.eta_rate = sample
+          else
+            self.eta_rate = self.eta_rate * 0.75 + sample * 0.25
+          end
+          self.eta_rate_samples += 1
+        end
+        self.eta_rate_time = work
+        self.eta_rate_progress = pct
+      end
+    end
+
+    if observed >= 0 && self.eta_rate != nil && self.eta_rate_samples >= 3
+      var recent = (1.0 - pct) / self.eta_rate
+      # Avoid projecting one unusual layer over the rest of the print.
+      recent = max(observed * 0.5, min(observed * 1.5, recent))
+      observed = observed * 0.85 + recent * 0.15
+    end
+
+    var adaptive = -1
+    if slicer >= 0
+      adaptive = slicer
+      if observed >= 0
+        # At 10% the slicer dominates. By 75%, observed pace contributes
+        # up to 55%, never displacing geometry-aware slicer knowledge.
+        var weight = min(0.55, max(0.0, (pct - 0.10) * 0.55 / 0.65))
+        weight *= min(1.0, work / 480.0)
+        # Still recover when the slicer severely underestimates a job:
+        # a depleted slicer countdown is not proof of completion.
+        var upper = max(slicer * 2.00, self.total_est * 0.35, 90.0)
+        var bounded = max(slicer * 0.50, min(upper, observed))
+        adaptive = (1.0 - weight) * slicer + weight * bounded
+      end
+    elif observed >= 0
+      # Metadata missing: don't invent an ETA after only a few seconds.
+      adaptive = observed
+    end
+    self.eta_adaptive_remaining = adaptive
+
+    var candidate = adaptive
+    self.eta_source = "adaptive"
+    if self.eta_mode == "slicer" && slicer >= 0
+      candidate = slicer
+      self.eta_source = "slicer"
+    elif slicer < 0 && observed >= 0
+      self.eta_source = "observed"
+    elif candidate < 0
+      self.eta_source = "calculating"
+    end
+    if candidate < 0
+      self.eta_smoothed = nil
+      self.eta_smooth_work = nil
+      return
+    end
+
+    # Slicer mode shows the reference estimate directly. Adaptive uses a
+    # projected countdown plus bounded corrections to prevent ETA jumps.
+    if self.eta_mode == "slicer" && slicer >= 0
+      self.eta_smoothed = candidate
+      self.eta_smooth_work = work
+    elif self.eta_smoothed == nil || self.eta_smooth_work == nil
+      self.eta_smoothed = candidate
+      self.eta_smooth_work = work
+    else
+      var elapsed_delta = work - self.eta_smooth_work
+      if elapsed_delta < -1
+        self.eta_smoothed = candidate
+      elif elapsed_delta > 0
+        var predicted = max(0.0, self.eta_smoothed - elapsed_delta)
+        var error = (candidate - predicted) * 0.25
+        var max_change = max(12.0, elapsed_delta * 1.5)
+        error = max(-max_change, min(max_change, error))
+        self.eta_smoothed = max(0.0, predicted + error)
+      end
+      self.eta_smooth_work = work
+    end
+
+    if self.eta_debug && now_ms() - self.eta_debug_tick >= 60000
+      self.eta_debug_tick = now_ms()
+      log(format("[KD ETA] mode=%s source=%s p=%d%% work=%ds slicer=%ds adaptive=%ds shown=%ds samples=%d prep_offset=%s",
+            self.eta_mode, self.eta_source, int(pct * 100), int(work),
+            int(self.eta_slicer_remaining), int(self.eta_adaptive_remaining),
+            int(self.eta_smoothed), self.eta_rate_samples, str(self.eta_start_seen)))
+    end
+  end
+
+  def eta_text()
+    if self.state == "paused" return "PAUSED" end
+    if self.remaining < 0
+      if self.state == "printing" return "ETA CALC" end
+      return "ETA --"
+    end
+    var minutes = int((self.remaining + 59) / 60)
+    if minutes >= 1440
+      return format("ETA %dd%dh", int(minutes / 1440), int((minutes % 1440) / 60))
+    end
+    if minutes >= 60
+      return format("ETA %dh%02dm", int(minutes / 60), int(minutes % 60))
+    end
+    return format("ETA %dm", minutes)
+  end
+
+  def finish_text()
+    if self.state == "paused" return "PAUSED" end
+    if self.remaining < 0 || hour() < 0 return "DONE --" end
+    var seconds = hour() * 3600 + minute() * 60 + self.remaining
+    var h24 = int(seconds / 3600) % 24
+    var mm = int(seconds / 60) % 60
+    var mark = "a"
+    if h24 >= 12 mark = "p" end
+    var h12 = h24 % 12
+    if h12 == 0 h12 = 12 end
+    return format("DONE %d:%02d%s", h12, mm, mark)
+  end
+
+  # In standard Klipper, extruder is T0, extruder1 is T1, etc.
+  # Physical Snapmaker U1 heads are numbered 1-4, hence the alternate H style.
+  def tool_index()
+    if self.tool == "extruder" return 0 end
+    var suffix = string.replace(self.tool, "extruder", "")
+    if suffix == "" return 0 end
+    return int(suffix)
+  end
+
+  def compact_tool_name()
+    var index = self.tool_index()
+    if self.tool_numbering == "head"
+      return "H" + str(index + 1)
+    end
+    return "T" + str(index)
+  end
+
+  # Normalize a slicer/firmware material name. Preserve material variants,
+  # but shorten the support subtype to keep 52px screens legible.
+  def valid_material_name(name)
+    if type(name) != "string" return "" end
+    var cleaned = string.toupper(string.tr(name, "\t\r\n", ""))
+    if cleaned == "" || cleaned == "NONE" || cleaned == "UNKNOWN" || cleaned == "-" return "" end
+    if re.search("SUPPORT|SUPP", cleaned) != nil
+      cleaned = string.replace(cleaned, "SUPPORT", "SUP")
+    end
+    return cleaned
+  end
+
+  # Only treat slicer material arrays as per-tool data when they can be mapped
+  # unambiguously to Klipper T numbers, or when the entire job is one type.
+  def material_for_tool(index)
+    # Firmware physical slot list: highest-confidence source for U1.
+    if index >= 0 && index < size(self.slot_materials)
+      var slot = self.valid_material_name(self.slot_materials[index])
+      if slot != ""
+        var subtype = ""
+        if index < size(self.slot_subtypes)
+          subtype = self.valid_material_name(self.slot_subtypes[index])
+        end
+        if subtype != "" && re.search("SUP", subtype) != nil && re.search("SUP", slot) == nil
+          slot += " SUP"
+        end
+        return slot
+      end
+    end
+    if size(self.meta_materials) == 0 return "" end
+    var chosen = ""
+    # Metadata may be indexed by referenced tool (sparse T0,T3 print),
+    # or by the full 0-based slicer extruder list.
+    if size(self.meta_tools) > 0 && size(self.meta_tools) == size(self.meta_materials)
+      var i = 0
+      while i < size(self.meta_tools)
+        if int(self.meta_tools[i]) == index
+          chosen = self.valid_material_name(self.meta_materials[i])
+        end
+        i += 1
+      end
+    elif index >= 0 && index < size(self.meta_materials) && size(self.meta_materials) > 1
+      chosen = self.valid_material_name(self.meta_materials[index])
+    end
+    if chosen != "" return chosen end
+    # A single type (or identical repeated types) is safe as a job-wide
+    # descriptor, even without a reliable per-head mapping.
+    var common = ""
+    for item : self.meta_materials
+      var value = self.valid_material_name(item)
+      if value != ""
+        if common == "" common = value
+        elif value != common return "" end
+      end
+    end
+    return common
+  end
+
+  # Same minimalist page markers as Media Desk: y=0 is unused by small font.
+  def draw_page_pips()
+    if !self.show_pips return end
+    var count = self.page_count()
+    if count < 2 return end
+    var i = 0
+    while i < count
+      var c = 0x203044
+      if i == self.page c = 0xDCEEFF end
+      pixel(width() - 1 - i * 3, 0, c)
+      i += 1
+    end
+  end
+
+  def refresh_labels()
+    self.remaining = -1
+    if self.demo
+      if self.total_est > self.elapsed
+        self.remaining = int(self.total_est - self.elapsed)
+      end
+    elif self.eta_smoothed != nil && (self.state == "printing" || self.state == "paused")
+      self.remaining = int(max(0.0, self.eta_smoothed))
+    end
+
+    self.layer_label = "L--/--"
+    if self.layer != nil && self.total_layers != nil && num(self.total_layers) > 0
+      self.layer_label = format("L%d/%d", int(self.layer), int(self.total_layers))
+    elif self.layer != nil
+      self.layer_label = format("L%d", int(self.layer))
+    end
+    self.pct_label = format("%d%%", self.pct)
+    self.eta_label = self.eta_text()
+    self.finish_label = self.finish_text()
+
+    var tool_no = str(self.tool_index())
+    self.active_tool_label = ""
+    if self.tool_seen self.active_tool_label = self.compact_tool_name() end
+    var display_tool = self.compact_tool_name()
+    self.tool_label = display_tool + " --"
+    if self.tool_temp != nil
+      self.tool_label = format("%s %dC", display_tool, int(self.tool_temp + 0.5))
+    end
+    self.bed_label = "B --"
+    if self.bed_temp != nil
+      self.bed_label = format("B %dC", int(self.bed_temp + 0.5))
+    end
+    # Prefer actual per-head firmware slots, then per-tool slicer metadata.
+    # Never insert "JOB" or claim a tool material when metadata is ambiguous.
+    self.material_label = display_tool + " MAT --"
+    var kind = self.material_for_tool(self.tool_index())
+    if kind != "" self.material_label = display_tool + " " + kind end
+
+    self.used_label = "USED --"
+    if self.filament_used != nil
+      var use_grams = self.filament_units == "grams" || (self.filament_units == "alternate" && self.filament_alt_grams)
+      if use_grams
+        var total_grams = nil
+        var used_grams = nil
+        if self.filament_weight_total != nil && self.filament_weight_total > 0
+          total_grams = self.filament_weight_total
+          if self.filament_total != nil && self.filament_total > 0
+            # Live filament_used is a TOTAL length, not per-tool grams.
+            # Scale against slicer planned length/weight; approximate in a
+            # multi-material print where per-tool linear mass differs.
+            used_grams = max(0.0, num(self.filament_used) / num(self.filament_total) * total_grams)
+          end
+        else
+          # Geometric fallback: length(mm) * pi*(diameter/2)^2 * density / 1000
+          # mm^3 to cm^3, then grams. Intended as an approximate figure.
+          var grams_per_mm = 3.14159265 * self.filament_dia * self.filament_dia / 4.0 * self.filament_density / 1000.0
+          used_grams = max(0.0, num(self.filament_used) * grams_per_mm)
+          if self.filament_total != nil && self.filament_total > 0
+            total_grams = self.filament_total * grams_per_mm
+          end
+        end
+        if used_grams != nil && total_grams != nil
+          self.used_label = format("~%.1f/%.1fg", used_grams, total_grams)
+        elif used_grams != nil
+          self.used_label = format("USED ~%.1fg", used_grams)
+        elif total_grams != nil
+          self.used_label = format("TOTAL %.1fg", total_grams)
+        end
+        if text_ink_width(self.used_label) > width() && used_grams != nil && total_grams != nil
+          self.used_label = format("~%.0f/%.0fg", used_grams, total_grams)
+        end
+      else
+        if self.filament_total != nil && self.filament_total > 0
+          self.used_label = format("F %.1f/%.1fm", num(self.filament_used) / 1000.0, num(self.filament_total) / 1000.0)
+        else
+          self.used_label = format("USED %.1fm", num(self.filament_used) / 1000.0)
+        end
+      end
+    end
+  end
+
+  def should_show()
+    if self.demo return true end
+    if self.offline && self.alert_offline return true end
+    if self.state != "printing" && self.state != "paused" return false end
+    return now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000)
+  end
+
+  # The duration is chosen once when the app enters the rotation. Use
+  # one complete cycle when actively printing, so every enabled page appears.
+  # Pauses and startup phases remain a single status screen.
+  def page_count()
+    var n = self.show_material ? 4 : 3
+    if self.style == "expressive" && self.printer_scene n += 1 end
+    return n
+  end
+
+  def cycling_now()
+    return self.auto_pages && self.state == "printing" && !self.is_preparing()
+  end
+
+  def duration()
+    if self.cycling_now()
+      return self.page_count() * self.page_secs * 1000
+    end
+    return self.turn_ms
+  end
+
+  def on_show()
+    self.page = 0
+    self.prev_page = -1
+    self.transition_started = -10000
+    self.page_started = now_ms()
+  end
+
+  # Alternate only when the FILAMENT page actually appears, not when the
+  # whole app appears (which may happen before reaching the material page).
+  # Save the last unit so reloading the Berry script does not reset the cycle.
+  def on_material_page_enter()
+    if !self.show_material || self.page != 3 || self.filament_units != "alternate" return end
+    self.filament_alt_grams = !self.filament_alt_grams
+    store.set("filament_alt_grams_last", self.filament_alt_grams)
+    self.refresh_labels()
+    log("[KD FILAMENT] alternate units=" + (self.filament_alt_grams ? "grams" : "meters"))
+  end
+
+  def transitions_on()
+    if self.state != "printing" || self.is_preparing() return false end
+    if self.page_fx == "off" return false end
+    if self.page_fx == "auto" && self.style == "minimal" return false end
+    return self.page_count() > 1
+  end
+
+  # Keep the page clock independent of UI drawing / Moonraker polling.
+  # If firmware misses a full page or more, do not animate stale pages.
+  def advance_page_clock()
+    if !self.cycling_now() return end
+    var interval = self.page_secs * 1000
+    var passed = now_ms() - self.page_started
+    if passed < interval return end
+    var steps = int(passed / interval)
+    var old = self.page
+    self.page = (self.page + steps) % self.page_count()
+    self.page_started += steps * interval
+    if old != self.page self.on_material_page_enter() end
+    if steps == 1 && old != self.page && self.transitions_on()
+      self.prev_page = old
+      self.transition_started = self.page_started
+    else
+      self.prev_page = -1
+    end
+  end
+
+  def on_button(btn)
+    if btn != "select" return false end
+    # Test event notifications on the clock with no print running.
+    if self.demo && self.state == "complete"
+      if self.notify_done self.completion_alert() end
+      return true
+    end
+    if self.demo && self.state == "error"
+      if self.notify_error self.error_alert() end
+      return true
+    end
+    if self.demo && self.state == "paused"
+      if self.notify_pause
+        if self.pause_reason == "" self.pause_reason = "PRINT PAUSED" end
+        self.pause_alert()
+      end
+      return true
+    end
+    if self.demo && self.demo_state == "milestone"
+      self.milestone_alert("PRINT 50%")
+      return true
+    end
+    var old = self.page
+    self.page = (self.page + 1) % self.page_count()
+    self.page_started = now_ms()  # Give manually selected page its full dwell.
+    if old != self.page self.on_material_page_enter() end
+    if self.transitions_on() && old != self.page
+      self.prev_page = old
+      self.transition_started = self.page_started
+    else
+      self.prev_page = -1
+    end
+    return true
+  end
+
+  # Self-contained caution graphic. The fill is deliberately darker than
+  # the red 2-pixel border so the white mark reads clearly on an LED matrix.
+  # Only Expressive animates; Minimal and Standard stay clean and static.
+  def draw_warning_art()
+    var blink = self.style == "expressive" && int(now_ms() / 520) % 2 == 0
+    var border = blink ? 0xFF6176 : 0xEC3554
+    var inside = blink ? 0x620D21 : 0x430819
+    var y = 0
+    while y < 15
+      var row = self.warning_pixels[y]
+      var x = 0
+      while x < 15
+        var k = row[x]
+        if k == "R"
+          pixel(x, y, border)
+        elif k == "b"
+          pixel(x, y, inside)
+        elif k == "W"
+          pixel(x, y, 0xFFF7EE)
+        end
+        x += 1
+      end
+      y += 1
+    end
+  end
+
+  # One page at a time. The offset enables BeautifulWeather-style
+  # vertical slides without using an image buffer or additional network calls.
+  def draw_print_page(idx, oy, ink)
+    if idx == 0
+      # The layer and percentage fit on the same 52-pixel row.
+      var left = self.layer_label
+      if text_ink_width(left) + text_ink_width(self.pct_label) + 3 > width()
+        if self.layer != nil
+          left = format("L%d", int(self.layer))
+        else
+          left = "L--"
+        end
+      end
+      text(0, 6 + oy, left, 0x44CCFF)
+      text(width() - text_ink_width(self.pct_label), 6 + oy, self.pct_label, ink)
+      var bottom = self.eta_label
+      if self.state == "paused" && self.pause_reason != "" bottom = self.pause_reason end
+      var right = ""
+      if self.show_active_tool && self.active_tool_label != ""
+        right = self.active_tool_label
+        # Try compact ETA first if the tool would collide with its text.
+        # Suppress the tool badge if the ETA/pause message still doesn't fit.
+        if text_ink_width(bottom) + text_ink_width(right) + 2 > width()
+          var shorter = string.replace(bottom, "ETA ", "")
+          if text_ink_width(shorter) + text_ink_width(right) + 2 <= width()
+            bottom = shorter
+          else
+            right = ""
+          end
+        end
+      end
+      text(0, 14 + oy, bottom, self.state == "paused" ? 0xFFB000 : 0xFFC050)
+      if right != "" text(width() - text_ink_width(right), 14 + oy, right, 0x66CCFF) end
+    elif idx == 1
+      text(0, 6 + oy, self.tool_label, 0xFF9060)
+      var bx = width() - text_ink_width(self.bed_label)
+      if bx < text_width(self.tool_label) + 2 bx = text_width(self.tool_label) + 2 end
+      if bx < width() text(bx, 6 + oy, self.bed_label, 0x66C8FF) end
+      text(0, 14 + oy, self.finish_label, 0xFFC050)
+    elif idx == 2
+      # A shorter, cached label; scroll_text moves only when it still cannot fit.
+      if oy == 0
+        scroll_text(0, 6 + oy, width(), self.file_label, 0x44CCFF)
+      else
+        text(0, 6 + oy, self.file_label, 0x44CCFF)
+      end
+      text(0, 14 + oy, self.eta_label, 0xFFC050)
+    elif idx == 3 && self.show_material
+      if text_ink_width(self.material_label) > width()
+        if oy == 0 scroll_text(0, 6 + oy, width(), self.material_label, 0x88DCFF)
+        else text(0, 6 + oy, self.material_label, 0x88DCFF) end
+      else
+        text(0, 6 + oy, self.material_label, 0x88DCFF)
+      end
+      if text_ink_width(self.used_label) > width()
+        if oy == 0 scroll_text(0, 14 + oy, width(), self.used_label, 0xFFC050)
+        else text(0, 14 + oy, self.used_label, 0xFFC050) end
+      else
+        text(0, 14 + oy, self.used_label, 0xFFC050)
+      end
+    else
+      self.draw_printer_scene(oy)
+    end
+
+  end
+
+  def draw()
+    clear()
+    font("small")
+    if self.offline && self.alert_offline && !self.demo
+      text(0, 6, "LINK LOST", 0xFF6544)
+      text(0, 14, "CHECK PRINTER", 0xFFBB77)
+      return
+    end
+    if self.demo && self.state == "complete"
+      # Pixel-art success check; no icon downloads needed.
+      pixel(0, 3, 0x33EE88)
+      pixel(1, 4, 0x33EE88)
+      pixel(2, 5, 0x33EE88)
+      pixel(3, 4, 0x33EE88)
+      pixel(4, 3, 0x33EE88)
+      pixel(5, 2, 0x33EE88)
+      text(9, 6, "PRINT DONE", 0x33EE88)
+      text(0, 14, "150/150  100%", 0x66CCFF)
+      if self.bar progress(100, 0x33EE88, 0x14251B) end
+      return
+    end
+    if self.demo && self.state == "error"
+      # A full 15x15 warning symbol is more legible than the former 7x7
+      # line-drawn icon. Split the label across the two text rows so neither
+      # the art nor the words collide on the narrow 52-pixel display.
+      self.draw_warning_art()
+      text(18, 6, "PRINT", 0xFF6370)
+      text(18, 14, "ERROR", 0xFFE5D4)
+      return
+    end
+    if self.is_preparing()
+      self.draw_preparation()
+      return
+    end
+    self.advance_page_clock()
+    var ink = self.accent
+    if self.state == "paused" ink = 0xFFB000 end
+
+    # The previous page rises out as the next one rises in from below.
+    # Retain the real print-progress bar and page dots in fixed positions.
+    var elapsed = now_ms() - self.transition_started
+    if self.transitions_on() && self.prev_page >= 0 && elapsed >= 0 && elapsed < self.transition_time
+      var u = clamp(elapsed / real(self.transition_time), 0.0, 1.0)
+      var eased = u * u * (3 - 2 * u)
+      var offset = int((1.0 - eased) * 16 + 0.5)
+      self.draw_print_page(self.prev_page, offset - 16, ink)
+      self.draw_print_page(self.page, offset, ink)
+    else
+      self.draw_print_page(self.page, 0, ink)
+    end
+
+    # Use the same gradient math as the preparation status screens.
+    self.draw_comet_bar(self.pct, ink, false)
+    self.draw_page_pips()
+    if self.anim && self.state == "paused" && int(now_ms() / 750) % 2 == 0
+      pixel(width() - 1, 0, 0xFFB000)
+    end
+  end
+end
+
+return KlipperDashboard()

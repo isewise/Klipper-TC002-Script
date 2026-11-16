@@ -1,0 +1,10 @@
+# AWTRIX NG emulator source/build (separate upstream repository)
+awtrix-ng/
+
+# Python
+__pycache__/
+*.pyc
+
+# Captured frames and scratch output
+*.png
+*.jsonl
