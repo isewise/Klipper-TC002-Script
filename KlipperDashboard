@@ -105,6 +105,7 @@ class KlipperDashboard
   var mmu_kind, afc_lanes, lane_tool, lane_mat, lane_col
   var klippy_state, klippy_note, idle_x, home_seen, kamp_nx, kamp_ny
   var meta_lh, meta_flh, z_hist, zprobe_seen, heads_bed, heads_active, z_layer, layer_from_z
+  var wifi_x, wifi_y, wifi_r, rnd, cele_kind, cele_at, cele_text, cele_cols, last_draw, cele_palette
 
   def init()
     # ------------------------------------------------------------------
@@ -148,7 +149,9 @@ class KlipperDashboard
     # Minutes the PRINT DONE / ERROR screen stays in the rotation after a
     # print you were following ends (0 = never show it).
     self.done_minutes = 10
-    # Animated backgrounds on the "finished" and progress alert pop-ups.
+    # Fireworks for "print finished" and the progress alerts: the app comes
+    # to the front and draws them (Standard and Expressive looks), in the
+    # print's own filament colours. false: plain pop-up alerts instead.
     self.alert_effects = true
     # Minutes the LINK LOST screen stays in the rotation after the printer
     # stopped answering mid-print ("Printer lost mid-print" setting).
@@ -227,11 +230,11 @@ class KlipperDashboard
     self.m117 = ""
     self.m117_last = ""
     self.phase_name = "PREPARING"
-    self.phase_detail = "Starting print"
+    self.phase_detail = "Starting"
     self.phase_time = 0
     self.phase_ttl = 0
     self.phase_label = "PREPARING"
-    self.phase_sub = "Starting print"
+    self.phase_sub = "Starting"
     self.tool_target = nil
     self.bed_target = nil
     self.notify_done = store.get("notify_done", false)
@@ -325,13 +328,32 @@ class KlipperDashboard
     self.check_x = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     self.check_y = [7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 3]
     self.done_palette = [0x1E9E6A, 0x44EE99, 0xD9FFE8, 0x44EE99, 0x1E9E6A]
+    # LINK LOST: a Wi-Fi symbol - dot (ring 0) and three arcs - whose
+    # arcs light up one after another, as if searching, beside a red X.
+    self.wifi_x = [4, 5, 6, 7, 8, 9, 10, 2, 3, 11, 12, 1, 5, 6, 7, 8, 9, 13, 0, 3, 4, 10, 11, 14, 2, 6, 7, 8, 12, 5, 9, 6, 7, 8, 6, 7, 8]
+    self.wifi_y = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 9, 9, 9, 10, 10, 10]
+    self.wifi_r = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 3, 2, 1, 1, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0]
+    # Fireworks: a fixed table of 64 pseudo-random numbers (0..1), so every
+    # burst has its own uneven spark pattern without random() in draw().
+    self.rnd = []
+    var seed = 7
+    while size(self.rnd) < 64
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      self.rnd.push(((seed >> 10) % 1000) / 1000.0)
+    end
+    self.cele_kind = ""
+    self.cele_at = 0
+    self.last_draw = 0
+    self.cele_text = ""
+    self.cele_cols = [0xFFD040, 0x44EE99, 0x66C8FF]
+    self.cele_palette = self.done_palette
     # Slicer time-based progress (M73), homing and gantry levelling state,
     # and slicer layer count / per-tool grams.
     self.m73_seen = false
     self.m73_fraction = 0.0
     self.m73_change_work = 0.0
     self.homed_axes = nil
-    self.homing_sub = "Homing axes"
+    self.homing_sub = "All axes"
     self.homing_at = 0
     self.level_pending = false
     self.level_name = ""
@@ -670,7 +692,7 @@ class KlipperDashboard
       self.meta_tools = []
       self.meta_colors = []
       self.phase_name = "PREPARING"
-      self.phase_detail = "Starting print"
+      self.phase_detail = "Starting"
       self.phase_time = 0
       # Ignore console lines from before this print (a manual homing or
       # probe just before starting it): total_duration is the time since
@@ -901,7 +923,7 @@ class KlipperDashboard
         var adding = self.homed_axes != nil && (homed == "" || size(homed) > size(self.homed_axes))
         self.homing_at = adding ? now_ms() : 0
         self.homed_axes = homed
-        self.homing_sub = homed == "" ? "Homing axes" : "Homed " + string.toupper(homed)
+        self.homing_sub = homed == "" ? "All axes" : "Homed " + string.toupper(homed)
       end
       # Bed size, to place probe points on the miniature bed drawing.
       var lo = head.find("axis_minimum")
@@ -1145,6 +1167,8 @@ class KlipperDashboard
   end
 
   def milestone_alert(label)
+    var snd = self.sound_milestone ? self.sound_for(self.milestone_sound, "milestone") : nil
+    if self.celebrate("milestone", label == "FIRST LAYER DONE" ? "FIRST LAYER" : label, snd) return end
     var alert = {"text": label, "textColor": 0x66EABB, "durationMs": 4000}
     if self.alert_effects
       alert["effect"] = "TwinklingStars"
@@ -1158,6 +1182,8 @@ class KlipperDashboard
 
   def completion_alert()
     # Sound is an explicit opt-in. The default is a silent notification.
+    var snd = self.sound_done ? self.sound_for(self.done_sound, "complete") : nil
+    if self.celebrate("done", "PRINT DONE", snd) return end
     var payload = {"text": "PRINT DONE", "textColor": 0x44EE99,
                    "durationMs": 8000, "progress": 100,
                    "progressColor": 0x44EE99, "progressTrackColor": 0x14251B}
@@ -1369,6 +1395,8 @@ class KlipperDashboard
       var count = size(self.mesh_px)
       var plan = size(self.plan_x)
       var detail = plan > 0 ? format("%d/%d points", min(count, plan), plan) : format("%d points", count)
+      # "12/25 points" is too wide to sit still beside the drawing.
+      if text_ink_width(detail) > width() - 16 detail = format("%d/%d pts", min(count, plan), plan) end
       self.set_stage("BED MESH", detail, 240)
     end
     self.probe_time = stamp
@@ -1388,24 +1416,24 @@ class KlipperDashboard
         self.phase_name = "PREPARING"
         self.phase_time = 0
       elif code == "PRINT_SWITCH_CHECKING"
-        self.set_stage("CHECK TOOLS", "Checking tools", 45)
+        self.set_stage("CHECK TOOLS", "Checking", 45)
       elif code == "PRINT_AUTO_FEEDING" || code == "PRINT_REPLENISHING"
-        self.set_stage("LOAD FILAMENT", "Loading filament", 140)
+        self.set_stage("LOAD FILAMENT", "Filament", 140)
       elif code == "PRINT_BED_DETECTING"
-        self.set_stage("BED CHECK", "Inspecting bed", 100)
+        self.set_stage("BED CHECK", "Inspecting", 100)
       elif code == "DETECT_PLATE"
-        self.set_stage("BED CHECK", "Detecting plate", 90)
+        self.set_stage("BED CHECK", "Plate", 90)
       elif code == "BED_PREHEATING"
-        self.set_stage("HEAT SOAK", "Soaking bed", 240)
+        self.set_stage("HEAT SOAK", "Soaking", 240)
       elif code == "BED_PRESCANNING"
-        self.set_stage("BED MESH", "Checking bed", 120)
+        self.set_stage("BED MESH", "Scanning", 120)
       elif code == "BED_LEVELING"
         self.clear_probes()
-        self.set_stage("BED MESH", "Bed leveling", 240)
+        self.set_stage("BED MESH", "Leveling", 240)
       elif code == "PRINT_PREEXTRUDING"
-        self.set_stage("PRIMING", "Priming nozzle", 90)
+        self.set_stage("PRIMING", "Nozzle", 90)
       elif code == "PRINT_RESUMING"
-        self.set_stage("RESUMING", "Resuming print", 35)
+        self.set_stage("RESUMING", "Print", 35)
       end
       return
     end
@@ -1425,7 +1453,7 @@ class KlipperDashboard
     # QGL / Z_TILT_ADJUST: "Retries: 1/5 Probed points range: 0.081250 ..."
     var tries = re.search("Retries: *[0-9]+/[0-9]+ *Probed points range: *([0-9]+[.]?[0-9]?[0-9]?[0-9]?)", msg)
     if tries != nil
-      self.set_stage("LEVELING", "Range " + tries[1] + "mm", 120)
+      self.set_stage("LEVELING", tries[1] + "mm", 120)
       return
     end
     if re.search("[Mm]esh [Bb]ed [Ll]eveling [Cc]omplete", msg) != nil
@@ -1440,7 +1468,7 @@ class KlipperDashboard
         self.set_stage("PROBING Z", "Probing Z", 60)
       end
     elif re.search("measure k:", msg) != nil
-      self.set_stage("FLOW CAL", "Calibrating flow", 65)
+      self.set_stage("FLOW CAL", "Calibrate", 65)
     else
       self.note_probe(msg, stamp)
     end
@@ -1486,28 +1514,28 @@ class KlipperDashboard
   # temperature, then M117, then a generic label. No invented stage timers.
   def update_stage_labels()
     self.phase_label = "PREPARING"
-    self.phase_sub = "Starting print"
+    self.phase_sub = "Starting"
     if self.demo
       if self.demo_state == "preparing"
-        self.phase_sub = "Finishing setup"
+        self.phase_sub = "Setting up"
       elif self.demo_state == "heating_bed"
         self.phase_label = "HEATING BED"
-        self.phase_sub = "B 42/60C"
+        self.phase_sub = "42/60C"
       elif self.demo_state == "heating_nozzle"
         self.phase_label = "HEAT NOZZLE"
-        self.phase_sub = "T 167/215C"
+        self.phase_sub = "167/215C"
       elif self.demo_state == "homing"
         self.phase_label = "HOMING"
-        self.phase_sub = "Homing axes"
+        self.phase_sub = "All axes"
       elif self.demo_state == "bed_mesh"
         self.phase_label = "BED MESH"
-        self.phase_sub = "Bed leveling"
+        self.phase_sub = "Leveling"
       elif self.demo_state == "loading_filament"
         self.phase_label = "LOAD FILAMENT"
-        self.phase_sub = "Loading filament"
+        self.phase_sub = "Filament"
       elif self.demo_state == "priming"
         self.phase_label = "PRIMING"
-        self.phase_sub = "Priming nozzle"
+        self.phase_sub = "Nozzle"
       end
       return
     end
@@ -1545,14 +1573,15 @@ class KlipperDashboard
     if self.bed_target != nil && self.bed_temp != nil
       if self.bed_target >= 30 && self.bed_target - self.bed_temp >= 3
         self.phase_label = "HEATING BED"
-        self.phase_sub = format("B %d/%dC", int(self.bed_temp+0.5), int(self.bed_target+0.5))
+        self.phase_sub = format("%d/%dC", int(self.bed_temp+0.5), int(self.bed_target+0.5))
         return
       end
     end
     if self.tool_target != nil && self.tool_temp != nil
       if self.tool_target >= 50 && (self.tool_target - self.tool_temp >= 4 || self.tool_temp - self.tool_target >= 4)
         self.phase_label = "NOZZLE TEMP"
-        self.phase_sub = format("T %d/%dC", int(self.tool_temp+0.5), int(self.tool_target+0.5))
+        # Short enough to sit still beside the drawing ("167/215C").
+        self.phase_sub = format("%d/%dC", int(self.tool_temp+0.5), int(self.tool_target+0.5))
         return
       end
     end
@@ -1564,7 +1593,7 @@ class KlipperDashboard
     # Unknown startup work is not necessarily waiting for a layer. In
     # particular, do not claim that bed leveling has finished solely
     # because a stage message got old.
-    self.phase_sub = "Finishing setup"
+    self.phase_sub = "Setting up"
   end
 
   # Shared progress/indeterminate renderer. Both paths use the *same*
@@ -1925,8 +1954,6 @@ class KlipperDashboard
       pixel(x, y, i == n - 1 ? 0xF2FFDE : (i >= n - 4 ? color : 0x2D9873))
       i += 1
     end
-    # Heat at the tip pulses while filament is emerging.
-    if n > 0 && int(t / 220) % 2 == 0 pixel(8, 9, 0xFFB858) end
   end
 
   # Loading is different from priming: a moving filament enters a feeder,
@@ -1936,11 +1963,12 @@ class KlipperDashboard
     circle(4, 5, 3, 0x819CAE)
     circle_fill(4, 5, 1, 0xD9EAF2)
     pixel(4, 2, 0x486174)
-    # Filament snakes in from above, alternating bright/dim sections.
+    # Filament feeds down from above into the feeder and nozzle: its
+    # bright and dim sections travel downward.
     var offset = int(t / 170) % 4
     var y = 0
     while y <= 11
-      pixel(9, y, (y + offset) % 4 <= 1 ? color : 0x24483F)
+      pixel(9, y, (y - offset + 4) % 4 <= 1 ? color : 0x24483F)
       y += 1
     end
     rect_fill(7, 5, 5, 4, 0x5A758A)
@@ -2045,6 +2073,7 @@ class KlipperDashboard
       elif name == "LOAD FILAMENT" name = "LOADING"
       elif name == "BED MESH" name = "MESH"
       elif name == "PROBING Z" name = "PROBING"
+      elif name == "CHECK TOOLS" name = "TOOLS"
       end
       self.draw_prep_art(head_color)
       if text_ink_width(name) > width() - 16
@@ -2527,6 +2556,153 @@ class KlipperDashboard
     self.prev_page = -1
     self.transition_started = -10000
     self.page_started = now_ms()
+    # Fireworks start when they are visible, not when they were asked for.
+    if self.cele_kind != "" && now_ms() - self.cele_at < 1500 self.cele_at = now_ms() end
+  end
+
+  # --- Fireworks ----------------------------------------------------------
+  # The app's own celebration: it brings itself to the front and draws
+  # rockets, bursts and (for a finished print) confetti. Returns false when
+  # it cannot - Minimal look, effects off, or the app not in the rotation -
+  # and the caller sends a plain pop-up alert instead.
+  def celebrate(kind, label, snd)
+    if self.style == "minimal" || !self.alert_effects return false end
+    # draw() only runs while the app is on screen. Already there: no
+    # rotation.show(), which would replay the app-switch slide onto itself.
+    var shown = now_ms() - self.last_draw < 500
+    if !shown
+      try
+        shown = rotation.show()
+      except .. as err, msg
+        shown = false
+      end
+    end
+    if !shown return false end
+    self.cele_kind = kind
+    self.cele_text = label
+    self.cele_at = now_ms()
+    self.page_started = self.cele_at
+    self.cele_cols = self.celebration_colors(kind)
+    # The words shimmer: green for a finished print, the progress colour
+    # (dark, full, near white) for a progress alert.
+    if kind == "done"
+      self.cele_palette = self.done_palette
+    else
+      var c = self.accent
+      var r = (c >> 16) & 255
+      var g = (c >> 8) & 255
+      var b = c & 255
+      var light = rgb(r + (255 - r) * 7 / 10, g + (255 - g) * 7 / 10, b + (255 - b) * 7 / 10)
+      self.cele_palette = [self.shade(c, 45), c, light, c, self.shade(c, 45)]
+    end
+    if snd != nil
+      try
+        sound.play(snd)
+        self.audio_log(kind + " sound played by the app")
+      except .. as err, msg
+        self.audio_log(kind + " sound_error=" + str(msg))
+      end
+    end
+    return true
+  end
+
+  # Burst colours: the filament colours the print used (each quarter of the
+  # model remembers its colour), then the active filament, then a festive
+  # default. A progress alert leads with the progress colour.
+  def celebration_colors(kind)
+    var cols = []
+    if kind == "milestone" cols.push(self.accent) end
+    for c : self.band_colors
+      if c >= 0 && cols.find(c) == nil cols.push(c) end
+    end
+    if self.active_color >= 0 && cols.find(self.active_color) == nil cols.push(self.active_color) end
+    for c : [0xFFD040, 0x44EE99, 0x66C8FF, 0xFF6BD5]
+      if size(cols) < 3 && cols.find(c) == nil cols.push(c) end
+    end
+    return cols
+  end
+
+  def celebrating()
+    if self.cele_kind == "" return false end
+    var span = self.cele_kind == "done" ? 5500 : 3800
+    if now_ms() - self.cele_at < span return true end
+    self.cele_kind = ""
+    return false
+  end
+
+  # Rockets rise with a short trail and burst: a white flash, then 20
+  # sparks thrown out at uneven angles and speeds, pulled down by gravity,
+  # fading and twinkling out. A finished print fires three rockets and then
+  # drifts confetti; a progress alert fires two. The text fades in on top.
+  def draw_celebration()
+    var t = (now_ms() - self.cele_at) / 1000.0
+    var done = self.cele_kind == "done"
+    var bursts = done ? 3 : 2
+    var b = 0
+    while b < bursts
+      var cx = done ? (b == 0 ? 12 : (b == 1 ? 39 : 26)) : (b == 0 ? 12 : 39)
+      var cy = done ? (b == 2 ? 7 : 6) : 6
+      var col = self.cele_cols[b % size(self.cele_cols)]
+      var u = t - b * (done ? 0.6 : 0.45) - 0.4
+      if u < 0 && u > -0.4
+        # The rocket climbs from the bottom edge, slowing as it rises.
+        var f = -u / 0.4
+        var ry = int(cy + (16 - cy) * f * f + 0.5)
+        pixel(cx, ry, 0xFFF0C8)
+        pixel(cx, ry + 1, self.shade(col, 55))
+        pixel(cx, ry + 2, self.shade(col, 25))
+      elif u >= 0 && u < 1.5
+        if u < 0.1 circle_fill(cx, cy, 3, self.shade(0xFFFFFF, int(100 - u * 1000))) end
+        var fade = 1.0 - u / 1.5
+        var i = 0
+        while i < 24
+          var r = self.rnd[(i + b * 21) % 64]
+          var a = i * 0.2618 + r * 0.4
+          var sp = 10.0 + r * 11.0
+          var ca = math.cos(a) * sp
+          var sa = math.sin(a) * sp * 0.6
+          # Late sparks twinkle out one by one instead of all at once.
+          if u < 0.9 || int(t * 18 + i) % 3 != 0
+            var c = i % 5 == 0 ? 0xFFF4D6 : col
+            # A short dim trail behind each spark makes it read as a streak.
+            var v = u - 0.07
+            if v > 0
+              pixel(int(cx + ca * v + 0.5), int(cy + sa * v + 5.5 * v * v + 0.5), self.shade(c, int(40 * fade)))
+            end
+            pixel(int(cx + ca * u + 0.5), int(cy + sa * u + 5.5 * u * u + 0.5), self.shade(c, int(100 * fade)))
+          end
+          i += 1
+        end
+      end
+      b += 1
+    end
+    if done
+      # Confetti in the print's colours drifts down, then thins out.
+      var dens = clamp((t - 1.6) * 1.5, 0.0, 1.0) * clamp((5.5 - t) * 0.8, 0.0, 1.0)
+      if dens > 0
+        var i = 0
+        while i < 24
+          var sp = 3.0 + self.rnd[i] * 4.0
+          var y = int((self.rnd[i + 24] * 16 + t * sp) % 19.0) - 2
+          var x = int(self.rnd[(i + 40) % 64] * 52 + math.sin(t * 2.5 + i) * 1.5)
+          var c = i % 4 == 3 ? 0xFFFFFF : self.cele_cols[i % size(self.cele_cols)]
+          var on = math.sin(t * (5 + self.rnd[i] * 5) + i) > -0.3
+          pixel(x, y, self.shade(c, int(100 * dens * (on ? 1.0 : 0.35))))
+          i += 1
+        end
+      end
+    end
+    # The words fade in once the first burst has opened.
+    var tf = clamp((t - (done ? 0.8 : 0.55)) / 0.4, 0.0, 1.0)
+    if tf > 0
+      var x = (width() - text_ink_width(self.cele_text)) / 2
+      var ink = done ? 0x44EE99 : self.accent
+      if tf < 1
+        text(x, 14, self.cele_text, self.shade(ink, int(100 * tf)))
+      else
+        ramp_text(x, 14, self.cele_text, self.cele_palette, 0, 0.5)
+      end
+    end
   end
 
   # Alternate only when the FILAMENT page actually appears, not when the
@@ -2537,7 +2713,7 @@ class KlipperDashboard
     self.filament_alt_grams = !self.filament_alt_grams
     store.set("filament_alt_grams_last", self.filament_alt_grams)
     self.refresh_labels()
-    log("[KD FILAMENT] alternate units=" + (self.filament_alt_grams ? "grams" : "meters"))
+    if self.debug_tool log("[KD FILAMENT] alternate units=" + (self.filament_alt_grams ? "grams" : "meters")) end
   end
 
   def transitions_on()
@@ -3187,22 +3363,26 @@ class KlipperDashboard
     return now_ms() - self.last_ok < self.link_lost_minutes * 60000
   end
 
-  # Two chain links pulled apart with a spark between them; the lower line
-  # alternates between how long ago and where the print was.
+  # A Wi-Fi symbol with a red X: no answer from the printer. The arcs light
+  # up from the dot outward and start again, as if searching (static in
+  # Minimal). The lower line alternates between how long ago and where the
+  # print was.
   def draw_link_lost()
     var t = now_ms()
     var lively = self.style != "minimal"
-    var spark = lively && int(t / 400) % 2 == 0
-    rect(0, 4, 6, 7, 0x8A9BAC)
-    rect(1, 5, 4, 5, 0x3C4650)
-    rect(9, 4, 6, 7, 0x8A9BAC)
-    rect(10, 5, 4, 5, 0x3C4650)
-    var s = spark ? 0xFFD07A : 0xFF6544
-    pixel(7, 3, s)
-    pixel(7, 5, s)
-    pixel(7, 7, 0xFFFFFF)
-    pixel(7, 9, s)
-    pixel(7, 11, s)
+    var lit = lively ? int((t % 2400) / 600) : 3
+    var i = 0
+    while i < size(self.wifi_x)
+      var r = self.wifi_r[i]
+      pixel(self.wifi_x[i], self.wifi_y[i], r <= lit ? (lively ? 0xFFBB77 : 0x8A9BAC) : 0x2A3540)
+      i += 1
+    end
+    i = 0
+    while i < 5
+      pixel(10 + i, 9 + i, 0xFF4F45)
+      pixel(14 - i, 9 + i, 0xFF4F45)
+      i += 1
+    end
     text(17, 6, "OFFLINE", 0xFF6544)
     var line = self.link_line1
     if int(t / 2500) % 2 == 1 && self.link_line2 != "" line = self.link_line2 end
@@ -3338,6 +3518,11 @@ class KlipperDashboard
   def draw()
     clear()
     font("small")
+    self.last_draw = now_ms()
+    if self.celebrating()
+      self.draw_celebration()
+      return
+    end
     if self.showing_link_lost()
       self.draw_link_lost()
       return

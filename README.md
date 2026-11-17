@@ -119,7 +119,7 @@ quote Klipper's own reason.
 **"Moonraker answers, but the Klipper service is not running"** (screen:
 **STOPPED**) – restart Klipper, for example from Mainsail's power menu.
 
-**Preparation stages show "Finishing setup"** – your printer does not report
+**Preparation shows "PREPARING / Setting up" with an hourglass** – your printer does not report
 what it is doing at that moment (no status messages, no probe output).
 Heating, homing, levelling and probing are still detected on every printer.
 

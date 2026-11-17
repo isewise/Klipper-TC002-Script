@@ -11,3 +11,6 @@ __pycache__/
 
 # Test output
 tests/out/
+
+# Other people's scripts kept for reference (not ours to publish)
+resources/

@@ -54,6 +54,22 @@ the clock showed against the real remaining time, and writes
 Recordings of other printers are welcome, especially AFC, Happy Hare and
 stock Snapmaker U1 firmware.
 
+## A real clock: `device_check.py`
+
+Checks the script on a real TC002 over its HTTP API: firmware and memory,
+then every Preview state with the clock's measured frame rate (AWTRIX caps
+it at about 41 fps) and a saved frame, then with `--live` a fake 9-head
+printer on this computer that the clock polls over the network. It reports
+script errors from the clock's log and memory before and after, and restores
+the app's settings.
+
+```bash
+python3 tests/device_check.py --clock 192.168.1.60 --live
+```
+
+`--live` needs the clock to reach this computer on port 17125 (open it in
+the firewall if needed). Results go to `tests/out/device_<time>/`.
+
 ## After changing the script
 
 1. `replay_check.py` on both recordings (`--prep`, then the whole print for
