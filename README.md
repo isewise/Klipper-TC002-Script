@@ -1,5 +1,7 @@
 # Klipper Dashboard for AWTRIX NG (Ulanzi TC002)
 
+**[Install from the AWTRIX Hub](https://awtrix.de/script/XyFadk4KssPL)** · [Releases](https://github.com/isewise/Klipper-TC002-Script/releases) · [Changelog](CHANGELOG.md)
+
 Keeps an eye on your Klipper printer for you. Glance at the clock and you
 see what the printer is doing before the first layer – heating, homing, the
 bed mesh filling in point by point – then the layer, an ETA you can trust,
@@ -57,7 +59,7 @@ Accuracy notes:
 
 ## Setup
 
-1. Install the script from the AWTRIX Hub, or import `KlipperDashboard.ax`
+1. Install the script from the [AWTRIX Hub](https://awtrix.de/script/XyFadk4KssPL), or import `KlipperDashboard.ax`
    from this repository on the **Scripts** tab of the AWTRIX web UI.
 2. Open **Apps**, press the gear button on **Klipper Dashboard**, and enter
    your printer's **IP address**. The clock cannot look up names such as

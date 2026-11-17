@@ -1,0 +1,94 @@
+name: My printer isn't shown right
+description: Preparation steps, layers, ETA, heads, filament colours or alerts don't match what your printer does.
+labels: ["printer support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every printer and firmware reports a little differently, so the best help is a **recording** of one print from your printer. The script was built from recordings of a Snapmaker U1 and a Klipper Ender 3 – yours makes it work on your printer too.
+  - type: input
+    id: model
+    attributes:
+      label: Printer make and model
+      placeholder: Creality K1 Max / Voron 2.4 / Snapmaker U1 / Prusa MK4 on Klipper
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type of printer
+      options:
+        - One head
+        - Tool changer (several heads)
+        - IDEX (two independent heads)
+        - Snapmaker U1
+        - One head with a multi-material unit (AFC, Happy Hare, ERCF…)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: firmware
+    attributes:
+      label: Firmware
+      options:
+        - Mainline Klipper (MainsailOS, KIAUH, Fluidd Pi…)
+        - Manufacturer's Klipper (Creality, Qidi, Sovol, Elegoo, Anycubic, Snapmaker…)
+        - Community firmware for a manufacturer's printer (e.g. paxx12 for the U1, rooted K1)
+        - Kalico / other Klipper fork
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Klipper Dashboard, AWTRIX NG, Klipper and Moonraker.
+      placeholder: Klipper Dashboard 1.0.0, AWTRIX NG 1.2.3, Klipper v0.13.0, Moonraker v0.11.0
+  - type: dropdown
+    id: slicer
+    attributes:
+      label: Slicer
+      options:
+        - OrcaSlicer (or a fork)
+        - PrusaSlicer / SuperSlicer
+        - Bambu Studio
+        - Cura
+        - Other
+  - type: checkboxes
+    id: wrong
+    attributes:
+      label: What's wrong?
+      options:
+        - label: Preparation steps (heating, homing, levelling, bed mesh, purge…)
+        - label: Layer numbers
+        - label: Progress or ETA
+        - label: Heads, temperatures or the active tool
+        - label: Filament colours or materials
+        - label: Alerts (finished, paused, filament out, errors…)
+        - label: Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What did the clock show, and what was the printer really doing?
+    validations:
+      required: true
+  - type: textarea
+    id: recording
+    attributes:
+      label: Recording (the most useful thing you can add)
+      description: |
+        On any computer on your network with Python 3, from a copy of this repository:
+
+        ```
+        python3 tools/record_moonraker.py --printer <printer IP> --out my_printer.jsonl
+        ```
+
+        Start it, then start a print; it stops by itself a little after the print ends and only reads from the printer. Zip the `.jsonl` file and drag it in here. It contains the file name and your printer's local address – nothing else personal.
+  - type: textarea
+    id: log
+    attributes:
+      label: Clock log
+      description: With **Debug logging** on (Apps → gear → Advanced), the `[KD` lines from the clock's **Log** tab.
+      render: text

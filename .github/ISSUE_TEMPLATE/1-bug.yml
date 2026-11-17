@@ -1,0 +1,60 @@
+name: Something's wrong
+description: The clock shows something wrong, an alert misbehaves, or the app stops with ERR.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Two things help most: what the clock showed (a photo is great) and the `[KD]` lines from the clock's **Log** tab.
+
+        Printer not shown right at all – preparation steps, layers, heads, colours? The **"My printer isn't shown right"** form asks the questions that help there.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What the clock showed, and when (preparing, printing, paused, after the print, idle…).
+      placeholder: During the bed mesh the clock showed "PREPARING / Setting up" for two minutes.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: printer
+    attributes:
+      label: Printer
+      description: Make and model, and number of heads.
+      placeholder: Voron 2.4, 1 head
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Klipper Dashboard (Scripts tab), AWTRIX NG firmware (System tab), Klipper and Moonraker (Mainsail/Fluidd → Machine).
+      placeholder: Klipper Dashboard 1.0.0, AWTRIX NG 1.2.3, Klipper v0.13.0, Moonraker v0.11.0
+    validations:
+      required: true
+  - type: dropdown
+    id: look
+    attributes:
+      label: Look (app setting)
+      options:
+        - Expressive
+        - Standard
+        - Minimal
+  - type: textarea
+    id: log
+    attributes:
+      label: Clock log
+      description: |
+        Turn on **Debug logging** (Apps → gear on Klipper Dashboard → Advanced), let it happen again, then copy the lines with `[KD` or `KlipperDashboard` from the clock's **Log** tab. Turn debug logging off afterwards.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Photos or anything else
+      description: A photo or screen recording of the clock helps a lot. Drag files in here.

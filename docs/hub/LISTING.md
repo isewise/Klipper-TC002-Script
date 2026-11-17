@@ -1,7 +1,8 @@
 # AWTRIX Hub listing
 
 What goes into each field of the Hub's "Share a script" form
-(https://awtrix.de/new/script). Update it with each release.
+(https://awtrix.de/new/script). Published at https://awtrix.de/script/XyFadk4KssPL;
+update it with each release.
 
 ## Name
 

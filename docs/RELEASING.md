@@ -22,7 +22,7 @@
    `KlipperDashboard.ax` attached. If the check fails, fix it, delete the
    tag (`git tag -d v1.0.1 && git push origin :v1.0.1`) and tag again.
 6. **Update the AWTRIX Hub** – the Hub has no upload API, so open the
-   script's Hub page, edit it, and paste the new `KlipperDashboard.ax`.
+   script's [Hub page](https://awtrix.de/script/XyFadk4KssPL), edit it, and paste the new `KlipperDashboard.ax`.
    Clocks that installed it from the Hub then offer **Update available**
    under **Scripts → Check for updates**. If the pictures changed,
    `python3 tools/make_media.py hub` remakes `docs/hub/`.

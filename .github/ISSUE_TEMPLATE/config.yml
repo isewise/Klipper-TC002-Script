@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install or update from the AWTRIX Hub
+    url: https://awtrix.de/script/XyFadk4KssPL
+    about: The script's page on the AWTRIX Hub.
+  - name: Questions about the clock or AWTRIX NG itself
+    url: https://discord.gg/cyBCpdx
+    about: Firmware, Wi-Fi, other apps – the AWTRIX community on Discord.

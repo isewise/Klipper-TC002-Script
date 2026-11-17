@@ -1,0 +1,59 @@
+name: AFC / Happy Hare / multi-material unit
+description: Feedback on multi-material units – support for AFC and Happy Hare is new and has not met a real unit yet.
+labels: ["multi-material"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AFC (Box Turtle, Night Owl and others) and Happy Hare (ERCF, Tradrack…) support was written from their documentation. Whether it works or not, a report from a real unit helps everyone who has one.
+  - type: dropdown
+    id: unit
+    attributes:
+      label: Unit and software
+      options:
+        - AFC (Armored Turtle) – Box Turtle
+        - AFC – other unit (Night Owl, QuattroBox…)
+        - Happy Hare – ERCF
+        - Happy Hare – Tradrack or other
+        - Other / none of these
+    validations:
+      required: true
+  - type: input
+    id: lanes
+    attributes:
+      label: Lanes or gates, and heads
+      placeholder: 4 lanes, 1 head
+    validations:
+      required: true
+  - type: dropdown
+    id: works
+    attributes:
+      label: Does it work?
+      options:
+        - Yes – tool, material and colour follow the unit
+        - Partly
+        - No
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What did the clock show, and what was loaded?
+      description: The tool badge (T0…), the material page, the colour swatch, tool-change alerts.
+  - type: textarea
+    id: objects
+    attributes:
+      label: What your unit reports
+      description: |
+        Open these in a browser while a print is running (replace the address) and paste the answers:
+
+        - AFC: `http://<printer IP>:7125/printer/objects/query?AFC`
+        - Happy Hare: `http://<printer IP>:7125/printer/objects/query?mmu`
+        - Everything Klipper has: `http://<printer IP>:7125/printer/objects/list`
+      render: json
+  - type: textarea
+    id: recording
+    attributes:
+      label: Recording (very welcome)
+      description: |
+        `python3 tools/record_moonraker.py --printer <printer IP> --out my_unit.jsonl` from a copy of this repository, during a print with a few tool changes. Zip the file and drag it in here.

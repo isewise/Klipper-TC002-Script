@@ -66,7 +66,7 @@ def main():
 
 ### Install or update
 
-- **AWTRIX Hub:** search for *Klipper Dashboard*. Installed from the Hub
+- **AWTRIX Hub:** https://awtrix.de/script/XyFadk4KssPL. Installed from the Hub
   already? Open the **Scripts** tab on your clock and press **Check for
   updates**; your settings are kept.
 - **By hand:** download `KlipperDashboard.ax` below and import it on the
