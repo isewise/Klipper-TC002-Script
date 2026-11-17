@@ -8,3 +8,6 @@ __pycache__/
 # Captured frames and scratch output
 *.png
 *.jsonl
+
+# Test output
+tests/out/

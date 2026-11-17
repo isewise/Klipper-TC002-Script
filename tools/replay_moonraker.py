@@ -10,9 +10,11 @@ to test the dashboard against a real printer's behaviour, repeatedly.
 --metadata is the Moonraker /server/files/metadata answer for the printed
 file (optional; without it the dashboard just has no slicer data).
 --start / --end trim the recording (seconds from its first status).
+Recordings may be gzip-compressed (.jsonl.gz), as in tests/recordings/.
 """
 import argparse
 import bisect
+import gzip
 import json
 import threading
 import time
@@ -24,7 +26,8 @@ class Replay:
     def __init__(self, a):
         self.a = a
         self.times, self.states, self.console = [], [], []
-        for line in open(a.recording):
+        opener = gzip.open if a.recording.endswith(".gz") else open
+        for line in opener(a.recording, "rt"):
             r = json.loads(line)
             if r["kind"] == "status":
                 self.times.append(r["t"])
@@ -98,8 +101,10 @@ class Handler(BaseHTTPRequestHandler):
                 rows = [dict(e, time=rp.shift(e["time"])) for e in rp.console[max(0, hi - count):hi]]
                 return self.send_json({"result": {"gcode_store": rows}})
             if url.path == "/_replay/status":
+                ps = st.get("print_stats", {})
                 return self.send_json({"recorded_time": rp.clock() - rp.times[0],
-                                       "state": st.get("print_stats", {}).get("state")})
+                                       "state": ps.get("state"),
+                                       "print_duration": ps.get("print_duration")})
         self.send_json({"error": {"code": 404, "message": "Not Found"}}, 404)
 
 

@@ -1,0 +1,60 @@
+{
+ "result": {
+  "size": 2140034,
+  "modified": 1794874798.0498967,
+  "uuid": "1ee976ba-d171-4d04-955f-bd00079fef2b",
+  "file_processors": [
+   "preprocess_cancellation"
+  ],
+  "slicer": "OrcaSlicer",
+  "slicer_version": "2.5.1",
+  "gcode_start_byte": 26844,
+  "gcode_end_byte": 2116090,
+  "layer_count": 38,
+  "object_height": 7.6,
+  "estimated_time": 5374,
+  "nozzle_diameter": 0.4,
+  "layer_height": 0.2,
+  "first_layer_height": 0.2,
+  "first_layer_extr_temp": 220.0,
+  "first_layer_bed_temp": 60.0,
+  "chamber_temp": 0.0,
+  "filament_name": "Generic PLA @Creality",
+  "filament_type": "PLA",
+  "filament_colors": [
+   "#26A69A"
+  ],
+  "extruder_colors": [
+   "#26A69A"
+  ],
+  "filament_temps": [
+   220
+  ],
+  "referenced_tools": [],
+  "mmu_print": 1,
+  "filament_total": 5042.7,
+  "filament_weight_total": 15.04,
+  "filament_weights": [
+   15.04
+  ],
+  "printer_model": "Creality Ender-3",
+  "printer_variant": "0.4",
+  "thumbnails": [
+   {
+    "width": 32,
+    "height": 32,
+    "size": 1048,
+    "relative_path": ".thumbs/Simple Flip Fidget (3)_PLA_1h30m-32x32.png"
+   },
+   {
+    "width": 300,
+    "height": 300,
+    "size": 18785,
+    "relative_path": ".thumbs/Simple Flip Fidget (3)_PLA_1h30m-300x300.png"
+   }
+  ],
+  "print_start_time": 1794874798.4502935,
+  "job_id": "000073",
+  "filename": "Simple Flip Fidget (3)_PLA_1h30m.gcode"
+ }
+}

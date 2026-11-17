@@ -463,6 +463,8 @@ class Sim:
         if self.p["layer_info"] and not idle:
             info = {"total_layer": self.a.layers, "current_layer": self.layer()}
         active = self.active_extruder()
+        # The nozzle height; a pause parks it 10 mm higher, as PAUSE macros do.
+        z = 0.2 * self.layer() + (10.0 if self.phase == "paused" else 0.0)
         st = {
             "webhooks": {"state": self.klippy, "state_message": self.klippy_msg},
             "print_stats": {
@@ -485,11 +487,11 @@ class Sim:
                 "homed_axes": self.homed_axes(), "axis_minimum": [0, 0, -2, 0],
                 "axis_maximum": [270, 270, 256, 0], "print_time": self.total_duration,
                 "stalls": 0, "estimated_print_time": self.total_duration,
-                "extruder": extruder_name(active), "position": [120.0, 98.5, 0.2 * self.layer(), 1500.0],
+                "extruder": extruder_name(active), "position": [120.0, 98.5, z, 1500.0],
                 "max_velocity": 500.0, "max_accel": 10000.0, "minimum_cruise_ratio": 0.5,
                 "square_corner_velocity": 5.0,
             },
-            "gcode_move": {"gcode_position": [120.0, 98.5, 0.2 * self.layer(), 1500.0]},
+            "gcode_move": {"gcode_position": [120.0, 98.5, z, 1500.0]},
             "heater_bed": {"temperature": round(bed[0], 2), "target": bed[1], "power": 0.4 if bed[1] else 0.0},
             # With M73 (Orca's default) Klipper reports the slicer's time-based
             # percentage, in whole percent; without it, the file progress.

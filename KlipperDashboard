@@ -104,7 +104,7 @@ class KlipperDashboard
   var link_reason, link_lost_minutes, link_line1, link_line2, idle_status, idle_color, idle_temps, idle_last
   var mmu_kind, afc_lanes, lane_tool, lane_mat, lane_col
   var klippy_state, klippy_note, idle_x, home_seen, kamp_nx, kamp_ny
-  var meta_lh, meta_flh, z_hist, zprobe_seen, heads_bed
+  var meta_lh, meta_flh, z_hist, zprobe_seen, heads_bed, heads_active, z_layer, layer_from_z
 
   def init()
     # ------------------------------------------------------------------
@@ -357,6 +357,9 @@ class KlipperDashboard
     self.z_hist = []
     self.zprobe_seen = 0
     self.heads_bed = "BED --"
+    self.heads_active = 0
+    self.z_layer = nil
+    self.layer_from_z = false
     self.link_line1 = "LINK LOST"
     self.link_line2 = ""
     self.idle_status = "OFFLINE"
@@ -707,6 +710,7 @@ class KlipperDashboard
       self.m73_fraction = 0.0
       self.m73_change_work = 0.0
       self.z_hist = []
+      self.z_layer = nil
       self.homed_axes = nil
       self.homing_at = 0
       self.home_seen = 0
@@ -839,10 +843,12 @@ class KlipperDashboard
     # G-code Z height and the file's layer heights. The lowest Z of the
     # last three polls ignores Z-hops on travel moves; the first minute of
     # extrusion counts as layer 1, so a raised purge line is not "layer 4".
+    # A pause parks the nozzle higher: keep the layer from before it.
+    self.layer_from_z = false
     if self.layer == nil && self.meta_layers > 0 && self.meta_lh > 0 && self.elapsed > 0
       var gm = values.find("gcode_move")
       var gp = isinstance(gm, map) ? gm.find("gcode_position") : nil
-      if isinstance(gp, list) && size(gp) >= 3
+      if st == "printing" && isinstance(gp, list) && size(gp) >= 3
         self.z_hist.push(num(gp[2], 0.0))
         if size(self.z_hist) > 3 self.z_hist.remove(0) end
         var z = self.z_hist[0]
@@ -851,8 +857,12 @@ class KlipperDashboard
         if self.elapsed >= 60
           est = int((z - self.meta_flh) / self.meta_lh + 0.5) + 1
         end
-        self.layer = max(1, min(self.meta_layers, est))
+        self.z_layer = max(1, min(self.meta_layers, est))
+      end
+      if self.z_layer != nil
+        self.layer = self.z_layer
         self.total_layers = self.meta_layers
+        self.layer_from_z = true
       end
     end
     if self.prelayer_zero && self.layer != nil && self.total_layers != nil
@@ -1291,8 +1301,9 @@ class KlipperDashboard
     # print_duration stays at 0 until the first extrusion, so homing,
     # heating, levelling and meshing all come before it on any printer.
     # A purge line extrudes, so Klipper's clock has started; while a
-    # recognised purge is fresh, it is still preparation.
-    if self.phase_name == "PRIMING" && self.phase_time > 0 && now_ms() - self.phase_time <= self.phase_ttl && self.elapsed < 300
+    # recognised purge is fresh, it is still preparation - unless the
+    # slicer itself numbers the layers.
+    if (self.layer == nil || self.layer_from_z) && self.phase_name == "PRIMING" && self.phase_time > 0 && now_ms() - self.phase_time <= self.phase_ttl && self.elapsed < 300
       return true
     end
     if self.layer == nil return self.elapsed < 1 end
@@ -2874,7 +2885,8 @@ class KlipperDashboard
   def klippy_halted(ks, message)
     var was_active = (self.state == "printing" || self.state == "paused") && (now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000))
     self.note_klippy(ks, message)
-    if self.observed && was_active && ks != "startup"
+    # "startup" too: Klipper restarted between two polls, the print is gone.
+    if self.observed && was_active
       self.finish_kind = "error"
       self.finished_at = now_ms()
       self.page_started = self.finished_at
@@ -3051,6 +3063,7 @@ class KlipperDashboard
       i += 1
     end
     self.heads_bed = self.bed_temp != nil ? format("BED %d", int(self.bed_temp + 0.5)) : "BED --"
+    self.heads_active = self.tool_index()
     # Idle screen: state word and colour, temperatures, last job.
     var gone = self.last_ok == 0 || now_ms() - self.last_ok > max(60000, self.idle_poll * 3000)
     var bt = self.bed_temp != nil ? self.bed_temp : 0
@@ -3123,7 +3136,7 @@ class KlipperDashboard
     var compact = shown > 4
     var per_row = compact ? 4 : 2
     var pitch = compact ? 13 : 26
-    var active = self.tool_index()
+    var active = self.heads_active
     var i = 0
     while i < per_row * 2 && first + i < n
       var h = first + i

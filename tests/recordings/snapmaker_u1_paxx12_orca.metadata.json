@@ -1,0 +1,124 @@
+{
+ "result": {
+  "size": 4585988,
+  "modified": 1794857797.9219828,
+  "uuid": "e4c0360d-ab58-4ab1-9b9c-70d2b94abf61",
+  "slicer": "OrcaSlicer",
+  "slicer_version": "2.5.1",
+  "gcode_start_byte": 34215,
+  "gcode_end_byte": 4549905,
+  "layer_count": 50,
+  "object_height": 10.05,
+  "estimated_time": 2490,
+  "nozzle_diameter": 0.4,
+  "layer_height": 0.2,
+  "first_layer_height": 0.25,
+  "first_layer_extr_temp": 220.0,
+  "first_layer_bed_temp": 55.0,
+  "chamber_temp": 0.0,
+  "filament_name": "Generic PLA Matte @System\";\"VOXELPLA PETG Plus @Snapmaker U1 (0.4 nozzle) - U1 Paxx\";\"Polymaker PLA Pro @Snapmaker U1\";\"Generic PLA Matte @System",
+  "filament_type": "PLA;PETG;PLA;PLA",
+  "filament_colors": [
+   "#0000FF",
+   "#000000",
+   "#CF5A13",
+   "#000000"
+  ],
+  "filament_weight": [
+   8.44,
+   0.0,
+   8.59,
+   0.0
+  ],
+  "filament_colour": "#0000FF;#000000;#CF5A13;#000000",
+  "filament_total": 5732.25,
+  "filament_weight_total": 17.03,
+  "filament_weights": [
+   8.44,
+   0.0,
+   8.59,
+   0.0
+  ],
+  "line_width": 0.42,
+  "outer_wall_speed": 200.0,
+  "outer_wall_acceleration": 5000.0,
+  "outer_wall_speed_list": [
+   200.0,
+   200.0,
+   200.0,
+   200.0
+  ],
+  "outer_wall_acceleration_list": [
+   5000.0,
+   5000.0,
+   5000.0,
+   5000.0
+  ],
+  "filament_diameter": [
+   1.75,
+   1.75,
+   1.75,
+   1.75
+  ],
+  "filament_used_mm": [
+   2828.76,
+   0.0,
+   2903.49,
+   0.0
+  ],
+  "filament_max_volumetric_speed": [
+   11.0,
+   20.0,
+   15.0,
+   11.0
+  ],
+  "filament_flow_ratio": [
+   0.98,
+   1.0,
+   0.96,
+   0.98
+  ],
+  "nozzle_temp": [
+   220.0,
+   250.0,
+   220.0,
+   220.0
+  ],
+  "nozzle_diameter_list": [
+   0.4,
+   0.4,
+   0.4,
+   0.4
+  ],
+  "filament_volume_type": [
+   "standard",
+   "standard",
+   "standard",
+   "standard"
+  ],
+  "print_sequence": "by layer",
+  "thumbnails": [
+   {
+    "width": 96,
+    "height": 96,
+    "size": 5021,
+    "relative_path": ".thumbs/obj_1_Assembly_PLA_17g_41m30s-96x96.png"
+   },
+   {
+    "width": 48,
+    "height": 48,
+    "size": 1488,
+    "relative_path": ".thumbs/obj_1_Assembly_PLA_17g_41m30s-48x48.png"
+   },
+   {
+    "width": 300,
+    "height": 300,
+    "size": 21195,
+    "relative_path": ".thumbs/obj_1_Assembly_PLA_17g_41m30s-300x300.png"
+   }
+  ],
+  "print_start_time": 1794857798.9422646,
+  "job_id": "000050",
+  "filename": "obj_1_Assembly_PLA_17g_41m30s.gcode"
+ }
+}
