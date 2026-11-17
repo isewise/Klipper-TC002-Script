@@ -1,7 +1,7 @@
 # @name     Klipper Dashboard
 # @desc     Keeps an eye on your Klipper printer for you: what it's doing before the first layer, every head's temperature, an ETA you can trust, and fireworks when it's done
 # @author   isewise
-# @version  1.0.0
+# @version  1.0.1
 # @display  52x16
 # @config   host      text   "Printer IP address" default="" group="Connection" help="Moonraker's IP address without http://, e.g. 192.168.1.50. Names ending in .local do not work."
 # @config   port      number "Moonraker port" default=7125 min=1 max=65535 group="Connection" help="7125 for Moonraker. 80 also works when Mainsail or Fluidd serves the printer."

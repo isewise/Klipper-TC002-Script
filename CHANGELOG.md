@@ -2,7 +2,7 @@
 
 Each release on GitHub and the AWTRIX Hub. The newest is at the top.
 
-## Unreleased
+## 1.0.1 – 2026-11-17
 
 - **Fireworks for black and dark filaments:** black and grey prints now
   burst in silver instead of a dark grey you could barely see, and other
