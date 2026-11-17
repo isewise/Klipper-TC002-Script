@@ -96,7 +96,7 @@ def main():
 
     if not a.no_install:
         res = req("PUT", AW + "/api/v1/apps/script/KlipperDashboard",
-                  raw=open(os.path.join(ROOT, "KlipperDashboard"), "rb").read())
+                  raw=open(os.path.join(ROOT, "KlipperDashboard.ax"), "rb").read())
         if not res.get("ok"):
             raise SystemExit("install failed: %s" % res)
     saved = {f["key"]: f["value"] for f in req("GET", AW + "/api/v1/apps/KlipperDashboard/config")["fields"]}

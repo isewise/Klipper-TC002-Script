@@ -17,7 +17,7 @@ Keeps an eye on your Klipper printer for you: what it's doing before the first l
 
 ## Script
 
-Upload or paste the file `KlipperDashboard` from the repository root.
+Upload or paste the file `KlipperDashboard.ax` from the repository root.
 
 When the Hub suggests `@needs` lines from the code: untick any sound
 entries. Sounds are optional (off by default) and the script runs without

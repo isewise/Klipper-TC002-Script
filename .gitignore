@@ -17,3 +17,4 @@ resources/
 
 # Pictures for the README and the AWTRIX Hub
 !docs/media/*.png
+!docs/hub/*.png

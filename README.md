@@ -57,7 +57,8 @@ Accuracy notes:
 
 ## Setup
 
-1. Install the script from the AWTRIX Hub (or paste it under **Scripts**).
+1. Install the script from the AWTRIX Hub, or import `KlipperDashboard.ax`
+   from this repository on the **Scripts** tab of the AWTRIX web UI.
 2. Open **Apps**, press the gear button on **Klipper Dashboard**, and enter
    your printer's **IP address**. The clock cannot look up names such as
    `voron.local`, so give the printer a fixed address in your router (a DHCP

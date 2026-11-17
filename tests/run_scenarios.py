@@ -29,7 +29,7 @@ import screen  # noqa: E402
 
 AW = os.environ.get("AW", "http://127.0.0.1:8080")
 MOCK = os.path.join(ROOT, "tools", "mock_moonraker.py")
-SCRIPT = os.path.join(ROOT, "KlipperDashboard")
+SCRIPT = os.path.join(ROOT, "KlipperDashboard.ax")
 
 BASE_CFG = {
     "host": "127.0.0.1", "poll": 3, "idle_poll": 10, "style": "standard",

@@ -14,6 +14,9 @@ writes docs/media/:
 
   python3 tools/make_media.py              everything (about 6 minutes)
   python3 tools/make_media.py finished     one scene
+  python3 tools/make_media.py hub          the AWTRIX Hub pictures in docs/hub/:
+                                           GIFs of at most 10 s (the Hub's limit),
+                                           a cover image and the still sheet
 
 The script is installed on the emulator first; its settings are restored.
 While filming, the emulator's time zone is set to one where it is daytime,
@@ -195,6 +198,61 @@ def scene_tour():
     return tour
 
 
+def trim(frames, max_ms=9900):
+    """At most max_ms of play time (the Hub takes GIFs up to 10 s)."""
+    frames = rebase(frames)
+    return [f for f in frames if f[0] < max_ms - 100]
+
+
+def scene_hub_mesh():
+    """The real Ender's KAMP mesh, from the plan to the last point."""
+    rec = os.path.join(ROOT, "tests", "recordings", "ender3_bltouch_kamp_orca")
+    start = 448.0
+    rp = subprocess.Popen([sys.executable, "-I", os.path.join(ROOT, "tools", "replay_moonraker.py"),
+                           rec + ".jsonl.gz", "--metadata", rec + ".metadata.json", "--port", str(PORT),
+                           "--speed", "9", "--start", str(start + 38), "--end", str(start + 125)],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(1)
+        show(LIVE)
+        time.sleep(1.2)
+        frames = gif.capture(HOST, 9.9, 10)
+    finally:
+        rp.terminate()
+    return trim(frames)
+
+
+def scene_hub():
+    hub = os.path.join(ROOT, "docs", "hub")
+    os.makedirs(hub, exist_ok=True)
+    clips = []
+    print(time.strftime("%H:%M:%S"), "hub: finished", flush=True)
+    finished = trim(scene_finished())
+    clips.append(("1-finished", finished))
+    print(time.strftime("%H:%M:%S"), "hub: mesh", flush=True)
+    clips.append(("2-bed-mesh", scene_hub_mesh()))
+    print(time.strftime("%H:%M:%S"), "hub: pages", flush=True)
+    show({"demo": True, "demo_state": "printing", "style": "expressive", "page_secs": 2})
+    time.sleep(1)
+    clips.append(("3-print-pages", trim(gif.capture(HOST, 9.9, 12))))
+    print(time.strftime("%H:%M:%S"), "hub: milestone", flush=True)
+    clips.append(("4-progress-alert", trim(scene_milestone())))
+    for name, frames in clips:
+        path = os.path.join(hub, name + ".gif")
+        n = gif.write_gif(path, frames, scale=8)
+        secs = (frames[-1][0] + 100) / 1000.0
+        print("  %s: %d frames, %.1f s, %d KB" % (path, n, secs, os.path.getsize(path) // 1024), flush=True)
+    # Cover: the fireworks frame with the most lit LEDs (fireworks leave the
+    # progress row dark; the pages around them do not).
+    fireworks = [f for f in finished if not any(f[3][15 * 52:16 * 52])] or finished
+    best = max(fireworks, key=lambda f: sum(1 for c in f[3] if c))
+    _, _, led = gif._led_image(52, 16, best[3], 8, 2)
+    rows = [bytearray(b"".join(bytes(((c >> 16) & 255, (c >> 8) & 255, c & 255))
+                               for c in led[y * 416:(y + 1) * 416])) for y in range(128)]
+    screen.write_png(os.path.join(hub, "0-cover.png"), 416, 128, rows)
+    print("  %s" % os.path.join(hub, "0-cover.png"), flush=True)
+
+
 def scene_screens():
     tiles = []
     for state in ("preparing", "heating_nozzle", "homing", "priming", "paused", "filament_out",
@@ -244,7 +302,7 @@ def scene_screens():
 def main():
     only = sys.argv[1:]
     os.makedirs(OUT, exist_ok=True)
-    res = req("PUT", "/api/v1/apps/script/" + APP, raw=open(os.path.join(ROOT, APP), "rb").read())
+    res = req("PUT", "/api/v1/apps/script/" + APP, raw=open(os.path.join(ROOT, APP + ".ax"), "rb").read())
     if not res.get("ok"):
         raise SystemExit("install failed: %s" % res)
     saved = {f["key"]: f["value"] for f in req("GET", "/api/v1/apps/%s/config" % APP)["fields"]}
@@ -252,6 +310,9 @@ def main():
     req("PUT", "/api/v1/system", {"tz": "JST-9", "tzName": "Asia/Tokyo"})
     clips = {}
     try:
+        if only == ["hub"]:
+            scene_hub()
+            return
         for name, fn in (("preparation", scene_preparation), ("printing", scene_printing),
                          ("finished", scene_finished), ("milestone", scene_milestone)):
             if only and name not in only:

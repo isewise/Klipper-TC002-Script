@@ -159,7 +159,7 @@ def main():
 
     logs = Logs(clock)
     if not a.no_install:
-        res = clock.req("PUT", "/api/v1/apps/script/" + APP, raw=open(os.path.join(ROOT, APP), "rb").read(),
+        res = clock.req("PUT", "/api/v1/apps/script/" + APP, raw=open(os.path.join(ROOT, APP + ".ax"), "rb").read(),
                         timeout=30)
         if not res.get("ok"):
             raise SystemExit("install failed: %s" % res)
