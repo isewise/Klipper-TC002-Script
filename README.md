@@ -1,10 +1,14 @@
 # Klipper Dashboard for AWTRIX NG (Ulanzi TC002)
 
-Your Klipper printer's status on the TC002's 52×16 display: progress, ETA,
-temperatures, the active tool and its filament, with drawings for each
-preparation step and a finish screen. Built for multi-head printers
-(tool changers, IDEX, Snapmaker U1, 8- and 9-head machines) and works with
-single-head printers too.
+Keeps an eye on your Klipper printer for you. Glance at the clock and you
+see what the printer is doing before the first layer – heating, homing, the
+bed mesh filling in point by point – then the layer, an ETA you can trust,
+and every head's temperature. When the print is done, fireworks go off in
+your filament's colours. It is built for multi-head printers (tool changers,
+IDEX, Snapmaker U1, 8- and 9-head machines) and is just as at home on a
+single-head Ender.
+
+![A print from heating to fireworks](docs/media/overview.gif)
 
 ## What it shows
 
@@ -14,12 +18,22 @@ single-head printers too.
 - **Before the first layer:** what the printer is doing – heating, homing,
   gantry levelling, bed mesh (with a live map of the probe points), heat
   soak, priming – instead of a 0% bar.
-- **Alerts** (each optional): print finished, failed, paused or out of
-  filament, progress milestones, tool changes, printer lost mid-print. Three
-  sound levels: off, failures only, or all.
+- **Alerts** (each optional): print finished (on by default, with fireworks
+  in the print's filament colours), failed, paused or out of filament,
+  progress milestones (first layer, 50%, 90%), tool changes, printer lost
+  mid-print. Three sound levels: off, failures only, or all.
 - **After a print:** a finish screen with the print time for 10 minutes.
 - **Between prints** (optional): printer state, temperatures and the last
   job – or why Klipper is not ready (printer off, shutdown, error).
+
+| | |
+|---|---|
+| ![Preparation on a real Ender 3: heating, homing, the KAMP bed mesh filling in, the purge line](docs/media/preparation.gif) | ![The print pages: progress, temperatures, every head, file, material, printer scene](docs/media/printing.gif) |
+| Before the first layer – recorded from a real Ender 3 with a BLTouch and KAMP | While printing – the pages take turns |
+| ![Fireworks in the print's filament colours, then the finish screen](docs/media/finished.gif) | ![The 50% progress alert](docs/media/milestone.gif) |
+| Print finished | A progress alert |
+
+![Other screens: preparing, nozzle heating, homing, priming, paused, filament out, error, idle, printer lost, 9 heads](docs/media/screens.png)
 
 Accuracy notes:
 
@@ -45,8 +59,10 @@ Accuracy notes:
 
 1. Install the script from the AWTRIX Hub (or paste it under **Scripts**).
 2. Open **Apps**, press the gear button on **Klipper Dashboard**, and enter
-   your printer's IP address or hostname. Port **7125** is Moonraker's own
-   port; **80** also works when Mainsail or Fluidd serves your printer.
+   your printer's **IP address**. The clock cannot look up names such as
+   `voron.local`, so give the printer a fixed address in your router (a DHCP
+   reservation). Port **7125** is Moonraker's own port; **80** also works
+   when Mainsail or Fluidd serves your printer.
 3. Start a print. The app joins the rotation when a print starts and leaves
    it afterwards (or stays, with **Show when idle**).
 
@@ -57,8 +73,8 @@ and pick a **Preview state**. Press select to test that state's alert.
 
 | Group | Settings |
 |---|---|
-| Connection | Moonraker IP or hostname, port, refresh interval, idle refresh interval |
-| Display | Look (minimal / standard / expressive), progress colour, seconds per page, material page, show when idle, tool labels (T0… or H1…), filament units |
+| Connection | Printer IP address, port, refresh interval, idle refresh interval |
+| Display | Look (minimal / standard / expressive – the default, with a drawing for each step), progress colour, seconds per page, material page, show when idle, tool labels (T0… or H1…), filament units |
 | Progress | Show preparation stages, ETA calculation |
 | Alerts | Print finished, failed, paused or filament out, progress alerts, tool changes, printer lost mid-print, alert sounds |
 | Advanced | Debug logging, preview |
@@ -89,7 +105,9 @@ wrong. Each line appears once, when the connection changes.
 
 **"No answer from http://…"** – the clock cannot reach Moonraker. Check the
 address and port, that the printer is on, and that it is on the same network
-as the clock.
+as the clock. Use the IP address: the clock cannot look up names such as
+`mainsailos.local` (it then also logs "The clock cannot look up printer
+names").
 
 **"Moonraker refused access (HTTP 401)" or 403** – your Moonraker requires
 a login (API key) for this clock. The script cannot use API keys, because the
@@ -138,6 +156,8 @@ python3 tools/record_moonraker.py --printer 192.168.1.50 --out my_printer.jsonl
 
 `tools/mock_moonraker.py` simulates printers for testing (`--help` lists the
 profiles), and `tools/replay_moonraker.py` plays a recording back.
+`tools/make_media.py` films the pictures on this page from the AWTRIX NG
+emulator, and `tools/gif.py` records any AWTRIX display as an animated GIF.
 [`tests/`](tests/README.md) runs the script on the AWTRIX NG emulator against
 both, including recorded prints from a Snapmaker U1 and a Klipper Ender 3.
 

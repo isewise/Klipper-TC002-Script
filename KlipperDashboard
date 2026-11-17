@@ -1,13 +1,13 @@
 # @name     Klipper Dashboard
-# @desc     Klipper printer status, multi-head materials, adaptive ETA and self-drawn status art
+# @desc     Keeps an eye on your Klipper printer for you: what it's doing before the first layer, every head's temperature, an ETA you can trust, and fireworks when it's done
 # @author   isewise
 # @version  1.0.0
 # @display  52x16
-# @config   host      text   "Moonraker IP or hostname" default="" group="Connection" help="Printer address without http://, e.g. 192.168.1.50 or voron.local."
+# @config   host      text   "Printer IP address" default="" group="Connection" help="Moonraker's IP address without http://, e.g. 192.168.1.50. Names ending in .local do not work."
 # @config   port      number "Moonraker port" default=7125 min=1 max=65535 group="Connection" help="7125 for Moonraker. 80 also works when Mainsail or Fluidd serves the printer."
 # @config   poll      number "Refresh interval" default=8 min=3 max=60 unit=s group="Connection" help="How often to ask the printer for news during a print."
 # @config   idle_poll number "Idle refresh interval" default=30 min=10 max=300 unit=s group="Connection" help="Used while no print runs or the printer is off, to keep the shared HTTP queue free."
-# @config   style     select "Look" default=standard options=minimal,standard,expressive group="Display" help="Minimal: static. Standard: glow and page slides. Expressive: adds stage art and a printer scene."
+# @config   style     select "Look" default=expressive options=minimal,standard,expressive group="Display" help="Minimal: static. Standard: glow and page slides. Expressive: adds stage art and a printer scene."
 # @config   accent    color  "Progress color" default=#33EE88 group="Display"
 # @config   page_secs number "Seconds per page" default=3 min=2 max=12 unit=s group="Display" help="Pages cycle at this pace while printing; the app stays for one full cycle."
 # @config   show_material bool "Material page" default=true group="Display" help="The active tool's material and the filament used by the job."
@@ -16,7 +16,7 @@
 # @config   filament_units select "Filament units" default=meters options=meters,grams,alternate group="Display" help="alternate switches between meters and grams on each visit to the material page."
 # @config   show_prep bool   "Show preparation stages" default=true group="Progress" help="Before the first layer, show what the printer is doing (heating, probing...) instead of 0%."
 # @config   eta_mode  select "ETA calculation" default=adaptive options=adaptive,slicer group="Progress" help="adaptive blends the observed pace into the slicer estimate. slicer shows the estimate as is."
-# @config   notify_done  bool "Print finished" default=false group="Alerts"
+# @config   notify_done  bool "Print finished" default=true group="Alerts" help="Fireworks in the print's filament colours (a plain alert in the Minimal look)."
 # @config   notify_error bool "Print failed" default=false group="Alerts" help="A Klipper error during a print. Cancelled prints never alert."
 # @config   notify_pause bool "Print paused or filament out" default=true group="Alerts"
 # @config   milestones select "Progress alerts" default=off options=off,first_layer,half,half_ninety,all group="Alerts" help="first_layer: layer 1 done. half: 50%. half_ninety: 50% and 90%. all: all three."
@@ -158,15 +158,15 @@ class KlipperDashboard
     self.link_lost_minutes = 30
     # ------------------------------------------------------------------
 
-    self.host = store.get("host", "")
-    self.base = format("http://%s:%d", self.host, int(store.get("port", 7125)))
-    self.poll_sec = max(3, int(store.get("poll", 8)))
-    self.idle_poll = max(self.poll_sec, min(300, int(store.get("idle_poll", 30))))
-    self.page_secs = max(2, min(12, int(store.get("page_secs", 3))))
+    self.host = store.get("host")
+    self.base = format("http://%s:%d", self.host, int(store.get("port")))
+    self.poll_sec = max(3, int(store.get("poll")))
+    self.idle_poll = max(self.poll_sec, min(300, int(store.get("idle_poll"))))
+    self.page_secs = max(2, min(12, int(store.get("page_secs"))))
     self.page_started = now_ms()
-    self.style = store.get("style", "standard")
+    self.style = store.get("style")
     if self.style != "minimal" && self.style != "standard" && self.style != "expressive"
-      self.style = "standard"
+      self.style = "expressive"
     end
     self.prev_page = -1
     self.transition_started = -10000
@@ -220,9 +220,9 @@ class KlipperDashboard
       "RRRRRRRRRRRRRRR",
       "RRRRRRRRRRRRRRR"
     ]
-    self.demo = store.get("demo", false)
-    self.demo_state = store.get("demo_state", "printing")
-    self.show_prep = store.get("show_prep", true)
+    self.demo = store.get("demo")
+    self.demo_state = store.get("demo_state")
+    self.show_prep = store.get("show_prep")
     self.console_busy = false
     self.console_time = 0
     self.stage_tick = 0
@@ -237,40 +237,40 @@ class KlipperDashboard
     self.phase_sub = "Starting"
     self.tool_target = nil
     self.bed_target = nil
-    self.notify_done = store.get("notify_done", false)
-    self.notify_error = store.get("notify_error", false)
-    self.notify_pause = store.get("notify_pause", true)
+    self.notify_done = store.get("notify_done")
+    self.notify_error = store.get("notify_error")
+    self.notify_pause = store.get("notify_pause")
     # One select covers the three milestone alerts.
-    var milestones = store.get("milestones", "off")
+    var milestones = store.get("milestones")
     self.notify_first = milestones == "first_layer" || milestones == "all"
     self.notify_half = milestones == "half" || milestones == "half_ninety" || milestones == "all"
     self.notify_ninety = milestones == "half_ninety" || milestones == "all"
     # off / failures (error, pause, runout) / all (also finished, milestones).
-    var sounds = store.get("sounds", "off")
+    var sounds = store.get("sounds")
     self.sound_error = sounds == "failures" || sounds == "all"
     self.sound_pause = self.sound_error
     self.sound_done = sounds == "all"
     self.sound_milestone = sounds == "all"
     # One switch for all [KD ...] log lines.
-    var debug = store.get("debug", false)
+    var debug = store.get("debug")
     self.debug_audio = debug
     self.eta_debug = debug
     self.debug_tool = debug
-    self.eta_mode = store.get("eta_mode", "adaptive")
+    self.eta_mode = store.get("eta_mode")
     self.reset_eta()
-    self.show_material = store.get("show_material", true)
-    self.filament_units = store.get("filament_units", "meters")
+    self.show_material = store.get("show_material")
+    self.filament_units = store.get("filament_units")
     # Remember the unit used on the last material-page visit. A script
     # reload must not silently restart every alternate cycle in grams.
     # Default true makes the first alternate visit show meters.
     self.filament_alt_grams = store.get("filament_alt_grams_last", true)
-    self.notify_tool = store.get("notify_tool", false)
-    self.tool_numbering = store.get("tool_numbering", "klipper")
+    self.notify_tool = store.get("notify_tool")
+    self.tool_numbering = store.get("tool_numbering")
     self.tool_seen = false
     self.tool_logged = false
     self.active_tool_label = ""
     # One switch: show LINK LOST and send one alert.
-    self.alert_offline = store.get("offline_alert", false)
+    self.alert_offline = store.get("offline_alert")
     self.notify_offline = self.alert_offline
     self.prev_layer = nil
     self.prev_pct = nil
@@ -360,7 +360,7 @@ class KlipperDashboard
     self.meta_layers = 0
     self.meta_weights = []
     # Idle screen, all-heads page, connection notes and MMU/AFC lanes.
-    self.show_idle = store.get("show_idle", false)
+    self.show_idle = store.get("show_idle")
     self.pages = [0]
     self.head_temp = []
     self.head_target = []
@@ -395,7 +395,7 @@ class KlipperDashboard
     self.lane_col = []
     self.observed = false
     self.in_flight = false
-    self.accent = store.get("accent", 0x33EE88)
+    self.accent = store.get("accent")
     self.tick = 0
     self.page = 0
     self.last_ok = 0
@@ -520,7 +520,7 @@ class KlipperDashboard
   def loop()
     if !self.demo && self.host == "" && self.link_reason != "nohost"
       self.link_reason = "nohost"
-      log("[KD] Set the printer address: Apps tab, gear button, Moonraker IP.")
+      log("[KD] Set the printer address: Apps tab, gear button, Printer IP address.")
     end
     if !self.demo && self.host != ""
       if self.tick <= 0 && !self.in_flight
@@ -750,6 +750,9 @@ class KlipperDashboard
     self.observed = true
     self.state = st
     self.last_ok = now_ms()
+    # A print found by a slow idle check: follow it at the print pace now,
+    # not after another idle interval.
+    if (st == "printing" || st == "paused") && self.tick > self.poll_sec self.tick = self.poll_sec end
     if st != "printing" && st != "paused"
       self.prev_pct = nil
       self.prev_layer = nil
@@ -2764,6 +2767,9 @@ class KlipperDashboard
       self.milestone_alert("PRINT 50%")
       return true
     end
+    # Select steps through the print pages. On every other screen the
+    # press goes back to AWTRIX (dismiss an alert, double press = display off).
+    if !self.cycling_now() return false end
     var old = self.page
     self.page = (self.page + 1) % self.page_count()
     self.page_started = now_ms()  # Give manually selected page its full dwell.
@@ -3048,6 +3054,9 @@ class KlipperDashboard
       log("[KD] Add this clock to trusted_clients in moonraker.conf [authorization].")
     elif reason == "noanswer"
       log("[KD] No answer from " + self.base + " - check address, port and power.")
+      if string.find(self.host, ".") < 0 || string.endswith(self.host, ".local")
+        log("[KD] The clock cannot look up printer names: enter its IP address.")
+      end
     elif status == 200
       log("[KD] Moonraker's reply could not be read.")
     else
@@ -3245,7 +3254,11 @@ class KlipperDashboard
     var bt = self.bed_temp != nil ? self.bed_temp : 0
     var tt = self.tool_temp != nil ? self.tool_temp : 0
     var heating = (self.bed_target != nil && self.bed_target > 0) || (self.tool_target != nil && self.tool_target > 0)
-    if self.last_ok == 0 && self.link_reason == ""
+    if self.host == ""
+      # Freshly installed: no printer address yet.
+      self.idle_status = "SET UP"
+      self.idle_color = 0xFFC050
+    elif self.last_ok == 0 && self.link_reason == ""
       # Not answered yet since the app (re)started.
       self.idle_status = "LINKING"
       self.idle_color = 0x6A7682
@@ -3274,6 +3287,7 @@ class KlipperDashboard
     # left so it does not touch the screen's edge.
     self.idle_x = text_ink_width(self.idle_status) > width() - 19 ? 17 : 18
     self.idle_temps = gone ? "--" : format("B%d T%d", int(bt + 0.5), int(tt + 0.5))
+    if self.host == "" self.idle_temps = "Printer IP" end
     if !gone && self.klippy_state != "ready" self.idle_temps = self.klippy_note end
     self.idle_last = ""
     if self.finish_kind == "complete"
