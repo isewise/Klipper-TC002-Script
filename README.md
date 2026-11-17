@@ -19,7 +19,7 @@ single-head printers too.
   sound levels: off, failures only, or all.
 - **After a print:** a finish screen with the print time for 10 minutes.
 - **Between prints** (optional): printer state, temperatures and the last
-  job.
+  job – or why Klipper is not ready (printer off, shutdown, error).
 
 Accuracy notes:
 
@@ -27,6 +27,11 @@ Accuracy notes:
   file has it – OrcaSlicer and its forks, PrusaSlicer and Bambu Studio write
   it by default. Otherwise progress comes from the G-code's position in the
   file, excluding thumbnails and the settings block.
+- Layer numbers come from the slicer when its printer profile sends them to
+  Klipper (`SET_PRINT_STATS_INFO`). Many profiles do not – OrcaSlicer's stock
+  Creality profiles, for one – and then, like Mainsail and Fluidd, the
+  script works the layer out from the nozzle height and the file's layer
+  height.
 - Filament colours and materials come from the slicer, or from the printer
   itself when it reports what is loaded (Snapmaker U1, AFC, Happy Hare).
 
@@ -72,6 +77,8 @@ script you have edited.
 | Multi-head: tool changers, IDEX, up to 16 heads | Supported |
 | Snapmaker U1 (tested with the paxx12 Extended Firmware) | Supported, including its preparation steps, heat-soak countdown and loaded filaments |
 | Gantry levelling (Voron QGL, Z-tilt) | Supported |
+| Probes reporting each point (BLTouch, inductive, Klicky…), old and new Klipper output | Supported, with a live map of the mesh |
+| KAMP adaptive mesh and line purge | Supported (tested on a Klipper Ender 3 with BLTouch) |
 | Slicers without layer information | Supported (preparation is detected from Klipper itself) |
 | AFC (Box Turtle and others), Happy Hare | Draft – feedback wanted |
 
@@ -99,6 +106,18 @@ trusted_clients:
 Most Moonraker installs (MainsailOS, KIAUH, stock Snapmaker U1 firmware)
 already trust the local network, so this only matters if you turned on
 forced logins.
+
+**"Klipper shutdown: Lost communication with MCU"** (the idle screen shows
+**SHUTDOWN / NO MCU**) – the computer running Moonraker is on, but the
+printer's board is switched off or unplugged. Power the printer on; if
+Klipper does not reconnect by itself, run `FIRMWARE_RESTART` from Mainsail
+or Fluidd. While Klipper is down the clock shows no temperatures, because
+Klipper's last readings stay frozen. A print that was running when Klipper
+stopped counts as failed. Other "Klipper shutdown" or "Klipper error" lines
+quote Klipper's own reason.
+
+**"Moonraker answers, but the Klipper service is not running"** (screen:
+**STOPPED**) – restart Klipper, for example from Mainsail's power menu.
 
 **Preparation stages show "Finishing setup"** – your printer does not report
 what it is doing at that moment (no status messages, no probe output).

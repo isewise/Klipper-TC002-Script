@@ -43,6 +43,8 @@ Control endpoints (curl them while a test runs; never need the API key):
   /_mock/runout                 runout on the active head (sensor false + pause)
   /_mock/error  /_mock/cancel  /_mock/complete
   /_mock/offline?secs=60        stop answering API requests for N seconds
+  /_mock/klippy?state=shutdown  Klipper state: ready, startup, shutdown, error,
+                                or disconnected (the service stopped: HTTP 503)
   /_mock/tool?n=2               switch the active tool (MMU: gate)
   /_mock/speed?x=30             change print-phase speed
 
@@ -52,6 +54,7 @@ Examples:
   python3 tools/mock_moonraker.py --profile voron --no-layer-info
   python3 tools/mock_moonraker.py --profile mmu --gates 4 --tool-every 6
   python3 tools/mock_moonraker.py --profile single --auth secret123
+  python3 tools/mock_moonraker.py --profile single --scenario shutdown
 """
 import argparse
 import json
@@ -124,6 +127,12 @@ class Sim:
         self.prep += [("mesh", 30), ("prime", 10)]
         self.prep_total = sum(d for _, d in self.prep)
         self.offline_until = 0.0
+        # Klipper's own state (webhooks). While it is not ready, Moonraker
+        # keeps answering with the last readings frozen.
+        self.klippy = "ready"
+        self.klippy_msg = "Printer is ready"
+        self.klippy_until = 0.0
+        self.frozen = None
         self.console = []
         self.reset("standby")
         self.timer = time.monotonic() + a.standby_secs  # when the next auto action happens
@@ -203,6 +212,17 @@ class Sim:
         now = time.monotonic()
         dt = now - self.last
         self.last = now
+        if self.klippy != "ready":
+            if self.klippy_until and now >= self.klippy_until:
+                if self.klippy in ("shutdown", "error", "disconnected"):
+                    # FIRMWARE_RESTART: a short startup, then a cold idle printer.
+                    self.set_klippy("startup")
+                    self.klippy_until = now + 6
+                else:
+                    self.set_klippy("ready")
+                    self.reset("standby")
+                    self.timer = now + (self.a.standby_secs if self.a.loop else 10 ** 9)
+            return
         if self.phase == "standby":
             if self.a.auto and now >= self.timer:
                 self.start(0.5 if self.a.scenario == "attach" else 0.0)
@@ -262,6 +282,12 @@ class Sim:
                 self.end("cancelled")
             elif s == "offline":
                 self.offline_until = now + self.a.offline_secs
+            elif s == "shutdown":
+                self.set_klippy("shutdown", "Lost communication with MCU 'mcu'")
+                self.klippy_until = now + self.a.offline_secs
+            elif s == "klippy_off":
+                self.set_klippy("disconnected")
+                self.klippy_until = now + self.a.offline_secs
         if f >= 1.0:
             self.end("complete")
 
@@ -271,7 +297,11 @@ class Sim:
         while self.probes_sent < due:
             i = self.probes_sent
             x, y = where(i)
-            self.console_push("probe at %.3f,%.3f is z=%.6f" % (x, y, 0.02 * ((i * 7) % 5 - 2)))
+            z = 0.02 * ((i * 7) % 5 - 2)
+            if self.a.old_probe_format:
+                self.console_push("probe at %.3f,%.3f is z=%.6f" % (x, y, z))
+            else:  # Klipper 0.13+
+                self.console_push("// probe: at %.3f,%.3f bed will contact at z=%.6f" % (x, y, z))
             self.probes_sent += 1
             if summaries and self.probes_sent in summaries:
                 self.console_push(summaries[self.probes_sent])
@@ -406,7 +436,25 @@ class Sim:
             objs.append("print_task_config")
         return objs
 
+    def set_klippy(self, state, message=""):
+        msgs = {"ready": "Printer is ready", "startup": "Klipper is starting up",
+                "disconnected": "Klippy Disconnected"}
+        if state == "ready":
+            self.frozen = None
+        elif self.frozen is None:
+            self.frozen = self.full_status()  # readings stop updating
+        self.klippy = state
+        self.klippy_msg = message or msgs.get(state, "Printer is shutdown")
+        if state in ("shutdown", "error"):
+            self.klippy_msg += "\nOnce the underlying issue is corrected, use the\n" \
+                "\"FIRMWARE_RESTART\" command to reset the firmware, reload the\n" \
+                "config, and restart the host software.\nPrinter is shutdown\n"
+
     def full_status(self):
+        if self.frozen is not None:
+            st = dict(self.frozen)
+            st["webhooks"] = {"state": self.klippy, "state_message": self.klippy_msg}
+            return st
         ext, bed = self.temps()
         state = {"prep": "printing", "print": "printing"}.get(self.phase, self.phase)
         idle = self.phase == "standby"
@@ -416,6 +464,7 @@ class Sim:
             info = {"total_layer": self.a.layers, "current_layer": self.layer()}
         active = self.active_extruder()
         st = {
+            "webhooks": {"state": self.klippy, "state_message": self.klippy_msg},
             "print_stats": {
                 "filename": "" if idle else self.a.filename,
                 "total_duration": round(self.total_duration, 3),
@@ -440,6 +489,7 @@ class Sim:
                 "max_velocity": 500.0, "max_accel": 10000.0, "minimum_cruise_ratio": 0.5,
                 "square_corner_velocity": 5.0,
             },
+            "gcode_move": {"gcode_position": [120.0, 98.5, 0.2 * self.layer(), 1500.0]},
             "heater_bed": {"temperature": round(bed[0], 2), "target": bed[1], "power": 0.4 if bed[1] else 0.0},
             # With M73 (Orca's default) Klipper reports the slicer's time-based
             # percentage, in whole percent; without it, the file progress.
@@ -523,7 +573,7 @@ class Sim:
         out = {"phase": self.phase, "stage": name if self.phase == "prep" else None,
                "layer": self.layer(), "fraction": round(self.frac(), 4), "tool": self.tool,
                "print_duration": round(self.print_duration, 1), "sensors": self.sensors,
-               "homed_axes": self.homed_axes(), "offline": time.monotonic() < self.offline_until,
+               "homed_axes": self.homed_axes(), "offline": time.monotonic() < self.offline_until, "klippy": self.klippy,
                "profile": self.a.profile, "tools": self.p["tools"], "scenario": self.a.scenario,
                "speed": self.a.speed}
         if self.p.get("gates"):
@@ -567,6 +617,8 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/printer/objects/list":
                 return self.send_json({"result": {"objects": sim.objects()}})
             if url.path == "/printer/objects/query":
+                if sim.klippy == "disconnected":
+                    return self.send_json({"error": {"code": 503, "message": "Klippy Disconnected"}}, 503)
                 return self.send_json(sim.query(params))
             if url.path == "/server/files/metadata":
                 meta = sim.metadata(q.get("filename", ""))
@@ -598,6 +650,11 @@ class Handler(BaseHTTPRequestHandler):
             sim.end("complete")
         elif cmd == "offline":
             sim.offline_until = now + float(q.get("secs", "60"))
+        elif cmd == "klippy":
+            sim.set_klippy(q.get("state", "shutdown"), q.get("message", ""))
+            sim.klippy_until = now + float(q["secs"]) if "secs" in q else 0.0
+            if sim.klippy == "ready":
+                sim.klippy_until = 0.0
         elif cmd == "tool":
             sim.tool = max(0, min(sim.slots() - 1, int(q.get("n", "0"))))
             sim.changing_until = now + 3.0
@@ -617,18 +674,22 @@ def main():
                     help="number of heads, 1-%d (default: profile's own; e.g. 8 or 9)" % MAX_TOOLS)
     ap.add_argument("--gates", type=int, default=0, help="MMU gates for the mmu profile (default 8)")
     ap.add_argument("--probe", choices=["classic", "scanning"], help="override the profile's probe type")
+    ap.add_argument("--old-probe-format", action="store_true",
+                    help="probe lines as Klipper before 0.13 wrote them ('probe at X,Y is z=')")
     ap.add_argument("--no-layer-info", action="store_true", help="no SET_PRINT_STATS_INFO layer data")
     ap.add_argument("--no-m117", action="store_true", help="no M117 stage messages")
     ap.add_argument("--auth", metavar="KEY", help="require this X-Api-Key, else answer 401")
     ap.add_argument("--no-m73", dest="m73", action="store_false",
                     help="slicer without M73 progress (display progress = file progress)")
     ap.add_argument("--scenario", default="full",
-                    choices=["full", "runout", "pause", "error", "cancel", "attach", "offline"])
+                    choices=["full", "runout", "pause", "error", "cancel", "attach", "offline",
+                             "shutdown", "klippy_off"])
     ap.add_argument("--event-at", type=float, default=0.35, help="print fraction where the scenario event fires")
     ap.add_argument("--standby-secs", type=float, default=20, help="real seconds idle before the print starts")
     ap.add_argument("--hold-secs", type=float, default=60, help="real seconds a finished state is held")
     ap.add_argument("--pause-secs", type=float, default=60, help="real seconds before auto-resume")
-    ap.add_argument("--offline-secs", type=float, default=60)
+    ap.add_argument("--offline-secs", type=float, default=60,
+                    help="how long offline, shutdown and klippy_off last")
     ap.add_argument("--prep-speed", type=float, default=1.0, help="sim seconds per real second during prep")
     ap.add_argument("--speed", type=float, default=20.0, help="sim seconds per real second while printing")
     ap.add_argument("--print-secs", type=float, default=7200, help="simulated printing time after prep")

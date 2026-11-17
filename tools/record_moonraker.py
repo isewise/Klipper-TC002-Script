@@ -23,6 +23,7 @@ import urllib.request
 OBJECTS = [
     "print_stats", "virtual_sdcard", "display_status", "pause_resume", "idle_timeout",
     "toolhead=extruder,homed_axes,position,axis_minimum,axis_maximum",
+    "gcode_move=gcode_position",
     "heater_bed=temperature,target",
     "bed_mesh=profile_name,mesh_min,mesh_max",
     "quad_gantry_level", "z_tilt", "machine_state_manager",

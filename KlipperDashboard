@@ -25,7 +25,7 @@
 # @config   sounds    select "Alert sounds" default=off options=off,failures,all group="Alerts" help="failures: errors, pauses and runouts. all: also finished and progress alerts."
 # @config   debug     bool   "Debug logging" default=false group="Advanced" help="Write [KD] lines about ETA, tools and sounds to the Log tab. Turn off after testing."
 # @config   demo      bool   "Preview without printing" default=false group="Advanced"
-# @config   demo_state select "Preview state" default=printing options=printing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone,idle,offline group="Advanced" help="Shown while Preview is on. Press select to test that state's alert."
+# @config   demo_state select "Preview state" default=printing options=printing,preparing,heating_bed,heating_nozzle,homing,bed_mesh,loading_filament,priming,paused,filament_out,complete,error,milestone,idle,offline group="Advanced" help="Shown while Preview is on. Press select to test that state's alert."
 
 # Copyright (c) 2026 isewise. MIT License: free to use, change and share;
 # keep this notice. Full text: LICENSE in the project's GitHub repository.
@@ -51,6 +51,12 @@
 #    your network, e.g. 192.168.1.0/24) to trusted_clients in the
 #    [authorization] section, then restart Moonraker. API keys are not
 #    supported: the printer's address differs for every user.
+#  "Klipper shutdown: Lost communication with MCU" (screen: SHUTDOWN /
+#    NO MCU): Moonraker's computer is on but the printer's board is off
+#    or unplugged. After powering it on, run FIRMWARE_RESTART if Klipper
+#    does not reconnect by itself. Other "Klipper shutdown/error" lines
+#    give Klipper's own reason; see Mainsail or Fluidd.
+#  "Klipper service is not running" (screen: STOPPED): restart Klipper.
 # ======================================================================
 
 import json
@@ -97,6 +103,8 @@ class KlipperDashboard
   var show_idle, pages, head_temp, head_target, head_text, head_label, head_color
   var link_reason, link_lost_minutes, link_line1, link_line2, idle_status, idle_color, idle_temps, idle_last
   var mmu_kind, afc_lanes, lane_tool, lane_mat, lane_col
+  var klippy_state, klippy_note, idle_x, home_seen, kamp_nx, kamp_ny
+  var meta_lh, meta_flh, z_hist, zprobe_seen, heads_bed
 
   def init()
     # ------------------------------------------------------------------
@@ -322,7 +330,7 @@ class KlipperDashboard
     self.m73_seen = false
     self.m73_fraction = 0.0
     self.m73_change_work = 0.0
-    self.homed_axes = "xyz"
+    self.homed_axes = nil
     self.homing_sub = "Homing axes"
     self.homing_at = 0
     self.level_pending = false
@@ -338,6 +346,17 @@ class KlipperDashboard
     self.head_label = []
     self.head_color = []
     self.link_reason = ""
+    self.klippy_state = "ready"
+    self.klippy_note = ""
+    self.idle_x = 18
+    self.home_seen = 0
+    self.kamp_nx = 0
+    self.kamp_ny = 0
+    self.meta_lh = 0.0
+    self.meta_flh = 0.0
+    self.z_hist = []
+    self.zprobe_seen = 0
+    self.heads_bed = "BED --"
     self.link_line1 = "LINK LOST"
     self.link_line2 = ""
     self.idle_status = "OFFLINE"
@@ -376,7 +395,7 @@ class KlipperDashboard
         self.state = "paused"
         self.pause_reason = "FILAMENT OUT"
       end
-      if self.demo_state == "heating_bed" || self.demo_state == "heating_nozzle" || self.demo_state == "homing" || self.demo_state == "bed_mesh" || self.demo_state == "loading_filament" || self.demo_state == "priming"
+      if self.demo_state == "preparing" || self.demo_state == "heating_bed" || self.demo_state == "heating_nozzle" || self.demo_state == "homing" || self.demo_state == "bed_mesh" || self.demo_state == "loading_filament" || self.demo_state == "priming"
         self.state = "printing"
         self.layer = 0
       end
@@ -490,7 +509,7 @@ class KlipperDashboard
       self.tick -= 1
       # Poll the lightweight console cache more frequently than the full
       # printer status, so short U1 preparation stages are less likely missed.
-      if self.console_stages && self.is_preparing()
+      if self.console_stages && self.reading_console()
         if self.stage_tick <= 0 && !self.console_busy
           self.console_busy = true
           self.stage_tick = 4
@@ -511,9 +530,11 @@ class KlipperDashboard
   # empty map, so optional heaters, sensors and U1 slot data are safe to ask
   # for. Field filters keep the response small. Rebuilt when capabilities load.
   def build_query()
-    var q = self.base + "/printer/objects/query?print_stats=state,filename,print_duration,total_duration,filament_used,message,info"
+    var q = self.base + "/printer/objects/query?webhooks=state,state_message"
+    q += "&print_stats=state,filename,print_duration,total_duration,filament_used,message,info"
     q += "&virtual_sdcard=progress,file_position&display_status=message,progress"
-    q += "&toolhead=extruder,homed_axes,axis_minimum,axis_maximum"
+    q += "&toolhead=extruder,homed_axes,position,axis_minimum,axis_maximum"
+    q += "&gcode_move=gcode_position"
     q += "&quad_gantry_level=applied&z_tilt=applied"
     q += "&heater_bed=temperature,target"
     if size(self.extruders) == 0
@@ -565,6 +586,14 @@ class KlipperDashboard
     var stats = isinstance(values, map) ? values.find("print_stats") : nil
     var st = isinstance(stats, map) ? stats.find("state") : nil
     if type(st) != "string"
+      if body != nil && status == 503
+        # Moonraker answers, but the Klipper service is not running.
+        self.note_link("", status)
+        self.offline_failures = 0
+        self.offline = false
+        self.klippy_halted("stopped", nil)
+        return
+      end
       self.note_link(body == nil ? "noanswer" : (status == 401 || status == 403 ? "auth" : "http"), status)
       self.on_failed_status()
       return
@@ -586,6 +615,17 @@ class KlipperDashboard
     var old_tool = self.tool
     var old_index = self.tool_index()
     var was_active = (self.state == "printing" || self.state == "paused") && (now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000))
+    # Klipper itself may be down while Moonraker answers: the printer board
+    # switched off, an emergency stop, a heater fault. Its last readings
+    # then stay frozen (a cold printer can still read 225 C, "printing"),
+    # so none of them are used until Klipper is ready again.
+    var hooks = values.find("webhooks")
+    var ks = isinstance(hooks, map) ? hooks.find("state") : nil
+    if type(ks) == "string" && ks != "ready"
+      self.klippy_halted(ks, hooks.find("state_message"))
+      return
+    end
+    self.note_klippy("ready", nil)
     # Judge sensors against the previous poll BEFORE handling a pause.
     # Klipper pauses ~0.5 s after a runout, so the sensor is usually seen
     # empty in the same poll that first reports "paused". Sensors of unused
@@ -666,6 +706,11 @@ class KlipperDashboard
       self.m73_seen = false
       self.m73_fraction = 0.0
       self.m73_change_work = 0.0
+      self.z_hist = []
+      self.homed_axes = nil
+      self.homing_at = 0
+      self.home_seen = 0
+      self.zprobe_seen = 0
     end
     # A pause must be witnessed. Never announce a pause on first connection.
     if self.observed && previous_state == "printing" && st == "paused" && was_active
@@ -789,6 +834,27 @@ class KlipperDashboard
     if self.layer != nil && self.total_layers == nil && self.meta_layers > 0
       self.total_layers = self.meta_layers
     end
+    # Many slicer profiles never tell Klipper the layer (no
+    # SET_PRINT_STATS_INFO). Like Mainsail and Fluidd, work it out from the
+    # G-code Z height and the file's layer heights. The lowest Z of the
+    # last three polls ignores Z-hops on travel moves; the first minute of
+    # extrusion counts as layer 1, so a raised purge line is not "layer 4".
+    if self.layer == nil && self.meta_layers > 0 && self.meta_lh > 0 && self.elapsed > 0
+      var gm = values.find("gcode_move")
+      var gp = isinstance(gm, map) ? gm.find("gcode_position") : nil
+      if isinstance(gp, list) && size(gp) >= 3
+        self.z_hist.push(num(gp[2], 0.0))
+        if size(self.z_hist) > 3 self.z_hist.remove(0) end
+        var z = self.z_hist[0]
+        for v : self.z_hist z = min(z, v) end
+        var est = 1
+        if self.elapsed >= 60
+          est = int((z - self.meta_flh) / self.meta_lh + 0.5) + 1
+        end
+        self.layer = max(1, min(self.meta_layers, est))
+        self.total_layers = self.meta_layers
+      end
+    end
     if self.prelayer_zero && self.layer != nil && self.total_layers != nil
       if num(self.total_layers) > 0 && num(self.layer) <= 0
         self.pct = 0
@@ -820,7 +886,9 @@ class KlipperDashboard
       # (xyz -> xy) for a while before probing, which is not homing.
       var homed = head.find("homed_axes")
       if type(homed) == "string" && homed != self.homed_axes
-        var adding = homed == "" || size(homed) > size(self.homed_axes)
+        # Unknown before a print's first poll: motors switched off by the
+        # idle timeout ("xyz" earlier, "" now) are not homing.
+        var adding = self.homed_axes != nil && (homed == "" || size(homed) > size(self.homed_axes))
         self.homing_at = adding ? now_ms() : 0
         self.homed_axes = homed
         self.homing_sub = homed == "" ? "Homing axes" : "Homed " + string.toupper(homed)
@@ -833,6 +901,33 @@ class KlipperDashboard
         self.bed_lo_y = num(lo[1], 0.0)
         self.bed_hi_x = num(hi[0], 0.0)
         self.bed_hi_y = num(hi[1], 0.0)
+      end
+      # G28 on a printer that is already homed leaves homed_axes at "xyz".
+      # While an axis homes, Klipper reports a made-up position beyond
+      # its limits (Z 374 on a 250 mm axis); a Z probe's descent then
+      # aims at Z's minimum. Both only during preparation.
+      var pos = head.find("position")
+      if isinstance(pos, list) && size(pos) >= 3 && isinstance(lo, list) && isinstance(hi, list) && size(lo) >= 3 && size(hi) >= 3
+        var beyond = -1
+        var a = 0
+        while a < 3
+          var v = num(pos[a], 0.0)
+          if v < num(lo[a], 0.0) - 1 || v > num(hi[a], 0.0) + 1 beyond = a end
+          a += 1
+        end
+        if beyond >= 0
+          self.home_seen = now_ms()
+          self.homing_sub = "Homing " + ["X", "Y", "Z"][beyond]
+        elif num(pos[2], 0.0) <= num(lo[2], 0.0) + 0.01
+          # Z aimed at its minimum: a probe is descending - Z homing
+          # right after an axis was seen homing, otherwise a Z probe.
+          if self.home_seen > 0 && now_ms() - self.home_seen < 30000
+            self.home_seen = now_ms()
+            self.homing_sub = "Homing Z"
+          else
+            self.zprobe_seen = now_ms()
+          end
+        end
       end
     end
 
@@ -1163,6 +1258,10 @@ class KlipperDashboard
     end
     n = r.find("layer_count")
     self.meta_layers = n != nil ? int(num(n, 0)) : 0
+    n = r.find("layer_height")
+    self.meta_lh = n != nil ? num(n, 0.0) : 0.0
+    n = r.find("first_layer_height")
+    self.meta_flh = n != nil ? num(n, 0.0) : self.meta_lh
     n = r.find("filament_weights")
     self.meta_weights = isinstance(n, list) ? n : []
     n = r.find("referenced_tools")
@@ -1172,6 +1271,13 @@ class KlipperDashboard
     end
     self.update_eta()
     self.refresh_labels()
+  end
+
+  # The console names preparation steps. Keep reading it for the first
+  # 30 s of extrusion too: a purge line (KAMP's "purge starting") is
+  # announced just as Klipper's print clock starts.
+  def reading_console()
+    return self.is_preparing() || (self.state == "printing" && self.elapsed < 30)
   end
 
   # Only use explicit layer tracking for the startup/printing transition.
@@ -1184,6 +1290,11 @@ class KlipperDashboard
     # Without layer numbers from the slicer, use Klipper itself: its
     # print_duration stays at 0 until the first extrusion, so homing,
     # heating, levelling and meshing all come before it on any printer.
+    # A purge line extrudes, so Klipper's clock has started; while a
+    # recognised purge is fresh, it is still preparation.
+    if self.phase_name == "PRIMING" && self.phase_time > 0 && now_ms() - self.phase_time <= self.phase_ttl && self.elapsed < 300
+      return true
+    end
     if self.layer == nil return self.elapsed < 1 end
     # The timeout protects a printer whose slicer does not update CURRENT_LAYER.
     return num(self.layer) <= 0 && self.elapsed < 1800
@@ -1203,8 +1314,10 @@ class KlipperDashboard
   # missed, movement across DIFFERENT XY points also identifies a mesh,
   # whereas repeated probes at one XY are usually Z homing.
   def note_probe(msg, stamp)
-    # Stock Klipper: "probe at 83.085,109.049"; U1: "probe at x: 83.085, y: 109.049".
-    var m = re.search("probe at *[xX]?:? *([-0-9.]+), *[yY]?:? *([-0-9.]+)", msg)
+    # Klipper 0.13+: "probe: at 87.138,67.813 bed will contact at z=...";
+    # older Klipper: "probe at 83.085,109.049 is z=..."; U1: "probe at x:
+    # 83.085, y: 109.049".
+    var m = re.search("probe:? at *[xX]?:? *([-0-9.]+), *[yY]?:? *([-0-9.]+)", msg)
     if m == nil return false end
     var x = num(m[1])
     var y = num(m[2])
@@ -1297,6 +1410,7 @@ class KlipperDashboard
       return
     end
     if self.note_mesh_plan(msg) return end
+    if self.note_kamp(msg) return end
     # QGL / Z_TILT_ADJUST: "Retries: 1/5 Probed points range: 0.081250 ..."
     var tries = re.search("Retries: *[0-9]+/[0-9]+ *Probed points range: *([0-9]+[.]?[0-9]?[0-9]?[0-9]?)", msg)
     if tries != nil
@@ -1323,7 +1437,7 @@ class KlipperDashboard
 
   def on_console(body, status)
     self.console_busy = false
-    if body == nil || status != 200 || !self.is_preparing() return end
+    if body == nil || status != 200 || !self.reading_console() return end
     var doc = self.safe_json(body)
     if !isinstance(doc, map) return end
     var result = doc.find("result")
@@ -1363,7 +1477,9 @@ class KlipperDashboard
     self.phase_label = "PREPARING"
     self.phase_sub = "Starting print"
     if self.demo
-      if self.demo_state == "heating_bed"
+      if self.demo_state == "preparing"
+        self.phase_sub = "Finishing setup"
+      elif self.demo_state == "heating_bed"
         self.phase_label = "HEATING BED"
         self.phase_sub = "B 42/60C"
       elif self.demo_state == "heating_nozzle"
@@ -1402,7 +1518,15 @@ class KlipperDashboard
       return
     end
     # Axes being added within the last 30 s: G28 is running, on any printer.
-    if self.homing_at > 0 && self.homed_axes != "xyz" && now_ms() - self.homing_at < 30000
+    # Or an axis seen homing (see the toolhead position) in the last poll.
+    var homing = self.homing_at > 0 && self.homed_axes != "xyz" && now_ms() - self.homing_at < 30000
+    if self.home_seen > 0 && now_ms() - self.home_seen < max(6000, self.poll_sec * 1500) homing = true end
+    if !homing && self.zprobe_seen > 0 && now_ms() - self.zprobe_seen < max(6000, self.poll_sec * 1500)
+      self.phase_label = "PROBING Z"
+      self.phase_sub = "Probing Z"
+      return
+    end
+    if homing
       self.phase_label = "HOMING"
       self.phase_sub = self.homing_sub
       return
@@ -1535,20 +1659,70 @@ class KlipperDashboard
     elif phase == "LOAD FILAMENT"
       self.draw_loading_art(t, color)
     else
-      # Universal busy spinner for unknown stages.
-      circle(7, 7, 5, 0x284253)
-      var step = int(t / 140) % 8
-      var sx = 7
-      var sy = 2
-      if step == 1 sx = 10 sy = 4
-      elif step == 2 sx = 12 sy = 7
-      elif step == 3 sx = 10 sy = 10
-      elif step == 4 sx = 7 sy = 12
-      elif step == 5 sx = 4 sy = 10
-      elif step == 6 sx = 2 sy = 7
-      elif step == 7 sx = 4 sy = 4
-      end
-      pixel(sx, sy, color)
+      # Unknown stages: an hourglass.
+      self.draw_hourglass_art(t, color)
+    end
+  end
+
+  # Hourglass for preparation steps the clock cannot name. Sand drains from
+  # the top bulb through the neck for about 8 s, a grain visibly falling;
+  # then the bottom pile fades to black and the top bulb fades back in.
+  # 33 grains per bulb.
+  def hourglass_half(y)
+    if y <= 2 || y >= 12 return 4 end
+    if y == 3 || y == 11 return 3 end
+    if y == 4 || y == 10 return 2 end
+    if y == 5 || y == 9 return 1 end
+    return 0
+  end
+
+  def draw_hourglass_art(t, color)
+    var cycle = t % 9000
+    var f = cycle >= 7800 ? 1.0 : cycle / 7800.0
+    var top_ink = color
+    var bottom_ink = self.shade(color, 80)
+    if cycle >= 8500
+      # The top bulb fades back in, the bottom is empty.
+      f = 0.0
+      top_ink = self.shade(color, (cycle - 8500) / 5)
+    elif cycle >= 7800
+      # The bottom pile fades to black.
+      bottom_ink = self.shade(color, (8500 - cycle) * 80 / 700)
+    end
+    rect_fill(1, 0, 13, 1, 0x70899E)
+    rect_fill(1, 14, 13, 1, 0x70899E)
+    var y = 1
+    while y <= 13
+      var w = self.hourglass_half(y) + 1
+      pixel(7 - w, y, 0x2E4A5C)
+      pixel(7 + w, y, 0x2E4A5C)
+      y += 1
+    end
+    var top = 33 - int(33 * f + 0.5)
+    var bottom = 33 - top
+    # Top bulb: the sand sits on the neck, filled from row 5 upward.
+    y = 5
+    while y >= 1 && top > 0
+      var k = min(top, 2 * self.hourglass_half(y) + 1)
+      line(7 - k / 2, y, 7 - k / 2 + k - 1, y, top_ink)
+      top -= k
+      y -= 1
+    end
+    # Bottom bulb: a pile growing from row 13 upward, centred.
+    y = 13
+    while y >= 9 && bottom > 0
+      var k = min(bottom, 2 * self.hourglass_half(y) + 1)
+      line(7 - k / 2, y, 7 - k / 2 + k - 1, y, bottom_ink)
+      bottom -= k
+      y -= 1
+    end
+    # The falling stream through the neck, one bright grain moving down.
+    if cycle < 7800
+      var dim = self.shade(color, 45)
+      pixel(7, 6, dim)
+      pixel(7, 7, dim)
+      pixel(7, 8, dim)
+      pixel(7, 6 + int(t / 110) % 3, 0xFFF4D0)
     end
   end
 
@@ -1930,6 +2104,11 @@ class KlipperDashboard
     var slicer = -1
     if self.total_est > 0
       slicer = max(0.0, self.total_est - work)
+      # With M73 the slicer's own remaining time is its total times the
+      # fraction left (what M73 R says). "Total minus time spent" stays
+      # high on a print running faster than the slicer thought (an Ender 3
+      # finished in 75 of 90 min), and would hold the ETA minutes long.
+      if self.m73_seen slicer = self.total_est * (1.0 - pct) end
     end
     self.eta_slicer_remaining = slicer
 
@@ -2504,6 +2683,48 @@ class KlipperDashboard
     return size(rows) > 0
   end
 
+  # KAMP (adaptive mesh and purge macros) prints its plan before probing:
+  # "Adapted probe count: 3,3", then "Adapted mesh bounds: (87.1, 67.8),
+  # (132.9, 152.2)". The grid between the bounds is the plan. Its purge
+  # announces itself with "KAMP purge starting at ...".
+  def note_kamp(msg)
+    var c = re.search("Adapted probe count: *([0-9]+), *([0-9]+)", msg)
+    if c != nil
+      self.kamp_nx = int(c[1])
+      self.kamp_ny = int(c[2])
+      return true
+    end
+    var b = re.search("Adapted mesh bounds: *\\(([-0-9.]+), *([-0-9.]+)\\), *\\(([-0-9.]+), *([-0-9.]+)\\)", msg)
+    if b != nil
+      var nx = self.kamp_nx
+      var ny = self.kamp_ny
+      if nx >= 2 && ny >= 2 && nx * ny <= 64
+        self.reset_mesh()
+        var x0 = num(b[1], 0.0)
+        var y0 = num(b[2], 0.0)
+        var x1 = num(b[3], 0.0)
+        var y1 = num(b[4], 0.0)
+        var j = 0
+        while j < ny
+          var i = 0
+          while i < nx
+            self.plan_x.push(x0 + (x1 - x0) * i / (nx - 1))
+            self.plan_y.push(y0 + (y1 - y0) * j / (ny - 1))
+            i += 1
+          end
+          j += 1
+        end
+        self.set_stage("BED MESH", format("0/%d points", nx * ny), 240)
+      end
+      return true
+    end
+    if re.search("KAMP purge starting", msg) != nil
+      self.set_stage("PRIMING", "Line purge", 10)
+      return true
+    end
+    return false
+  end
+
   # Planned points glow dimly; each probed point flashes, then settles to
   # teal; the latest one gets a crosshair. With a plan, the drawing fits the
   # planned area (an adaptive mesh fills the picture); without one, the
@@ -2647,6 +2868,54 @@ class KlipperDashboard
     end
   end
 
+  # Klipper is not ready (state "startup", "shutdown" or "error"), or its
+  # service is not running at all ("stopped", Moonraker answers HTTP 503).
+  # A print that was running has ended with it.
+  def klippy_halted(ks, message)
+    var was_active = (self.state == "printing" || self.state == "paused") && (now_ms() - self.last_ok <= max(30000, self.poll_sec * 4000))
+    self.note_klippy(ks, message)
+    if self.observed && was_active && ks != "startup"
+      self.finish_kind = "error"
+      self.finished_at = now_ms()
+      self.page_started = self.finished_at
+      self.build_done_text()
+      if self.notify_error self.error_alert() end
+    end
+    self.observed = true
+    self.state = "halted"
+    self.last_ok = now_ms()
+    self.prev_pct = nil
+    self.prev_layer = nil
+  end
+
+  # One log line per change of Klipper's state, with Klipper's reason.
+  def note_klippy(ks, message)
+    var first = ""
+    if type(message) == "string"
+      var cut = string.find(message, "\n")
+      first = cut > 0 ? message[0 .. cut - 1] : (cut == 0 ? "" : message)
+    end
+    # "Lost communication" / "Unable to connect": the printer's board is
+    # off or unplugged - the usual reason when the Pi stays powered.
+    if string.find(first, "Lost communication") >= 0 || string.find(first, "Unable to connect") >= 0
+      self.klippy_note = "NO MCU"
+    else
+      self.klippy_note = "KLIPPER"
+    end
+    if ks == self.klippy_state return end
+    self.klippy_state = ks
+    if ks == "ready"
+      log("[KD] Klipper is ready again.")
+    elif ks == "stopped"
+      log("[KD] Moonraker answers, but the Klipper service is not running.")
+    elif ks == "startup"
+      log("[KD] Klipper is starting up.")
+    else
+      var line = "[KD] Klipper " + ks + (first != "" ? ": " + first : ".")
+      log(size(line) > 110 ? line[0 .. 109] : line)
+    end
+  end
+
   # --- Heaters and lanes --------------------------------------------------
   # Active head and bed, plus every head for the all-heads page. A heating
   # stage records its starting temperature so the warm-up bar is real.
@@ -2781,6 +3050,7 @@ class KlipperDashboard
       self.head_color.push(c >= 0 ? self.led_color(c) : (compact ? 0xC8B49A : 0x3C4650))
       i += 1
     end
+    self.heads_bed = self.bed_temp != nil ? format("BED %d", int(self.bed_temp + 0.5)) : "BED --"
     # Idle screen: state word and colour, temperatures, last job.
     var gone = self.last_ok == 0 || now_ms() - self.last_ok > max(60000, self.idle_poll * 3000)
     var bt = self.bed_temp != nil ? self.bed_temp : 0
@@ -2793,6 +3063,11 @@ class KlipperDashboard
     elif gone
       self.idle_status = "OFFLINE"
       self.idle_color = 0x6A7682
+    elif self.klippy_state != "ready"
+      # Klipper down: its readings are stale, so no temperatures.
+      var ks = self.klippy_state
+      self.idle_status = ks == "startup" ? "STARTING" : (ks == "stopped" ? "STOPPED" : (ks == "shutdown" ? "SHUTDOWN" : "ERROR"))
+      self.idle_color = ks == "startup" ? 0x6A7682 : 0xFF6544
     elif self.state == "error"
       self.idle_status = "ERROR"
       self.idle_color = 0xFF5555
@@ -2806,7 +3081,11 @@ class KlipperDashboard
       self.idle_status = "READY"
       self.idle_color = 0x44EE99
     end
+    # Beside the drawing, an 8-letter word ("SHUTDOWN") moves one column
+    # left so it does not touch the screen's edge.
+    self.idle_x = text_ink_width(self.idle_status) > width() - 19 ? 17 : 18
     self.idle_temps = gone ? "--" : format("B%d T%d", int(bt + 0.5), int(tt + 0.5))
+    if !gone && self.klippy_state != "ready" self.idle_temps = self.klippy_note end
     self.idle_last = ""
     if self.finish_kind == "complete"
       # "LAST 1h56m" fits the full width; beside the drawing use "OK 1h56m".
@@ -2827,20 +3106,23 @@ class KlipperDashboard
 
   # --- All heads ------------------------------------------------------------
   # Up to four heads: "T0 215" in a 2x2 grid. Five to eight: four slots per
-  # row with the number only. Nine or more: two halves, alternating. Each
-  # slot has a bar in its filament colour (taller for the active head);
-  # heating heads are orange, the active head white, cold heads dim.
+  # row with the number only. Nine or more: two halves, alternating; a
+  # second half of four heads or fewer uses the labelled grid, so a lone
+  # "T8 170" says which head it is, and a free slot shows the bed. Each
+  # labelled slot has a bar in its filament colour (taller for the active
+  # head); heating heads are orange, the active head white, cold heads dim.
   def draw_heads_page(oy)
     var n = size(self.head_text)
     if n == 0
       text(0, 6 + oy, "HEADS --", 0x66C8FF)
       return
     end
-    var compact = n > 4
-    var per_row = compact ? 4 : 2
-    var pitch = compact ? 13 : 26
     var first = 0
     if n > 8 && int(now_ms() / 1500) % 2 == 1 first = 8 end
+    var shown = min(8, n - first)
+    var compact = shown > 4
+    var per_row = compact ? 4 : 2
+    var pitch = compact ? 13 : 26
     var active = self.tool_index()
     var i = 0
     while i < per_row * 2 && first + i < n
@@ -2875,6 +3157,13 @@ class KlipperDashboard
         text(x + 2, oy + base, self.head_label[h], ink)
       end
       i += 1
+    end
+    # Second half with room to spare: the bed in the next free slot.
+    if first > 0 && shown < 4
+      var bt = self.bed_temp != nil ? self.bed_temp : 0
+      var bg = self.bed_target != nil ? self.bed_target : 0
+      var ink = bg > 0 && bg - bt > 3 ? 0xFFA040 : (bt >= 40 || bg > 0 ? 0x66C8FF : 0x4C5862)
+      text((shown % 2) * 26 + 2, oy + (shown < 2 ? 6 : 14), self.heads_bed, ink)
     end
   end
 
@@ -2915,7 +3204,7 @@ class KlipperDashboard
     var t = now_ms()
     var x = 0
     if self.style != "minimal"
-      x = 18
+      x = self.idle_x
       rect_fill(1, 0, 14, 1, 0x9AB4C7)
       rect_fill(1, 1, 1, 12, 0x70899E)
       rect_fill(14, 1, 1, 12, 0x70899E)
