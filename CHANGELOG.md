@@ -2,6 +2,15 @@
 
 Each release on GitHub and the AWTRIX Hub. The newest is at the top.
 
+## Unreleased
+
+- **Fireworks for black and dark filaments:** black and grey prints now
+  burst in silver instead of a dark grey you could barely see, and other
+  dark colours (navy, forest green, brown) are brightened for the bursts.
+  Swatches and head colours are unchanged.
+- **Confetti** now uses every colour of a four-colour print; the fourth
+  colour was left out before.
+
 ## 1.0.0 – 2026-11-17
 
 First release on the AWTRIX Hub.

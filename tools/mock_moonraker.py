@@ -116,7 +116,7 @@ class Sim:
         n = self.slots()
         p["materials"] = per_tool(MATERIALS, n)
         p["subtypes"] = per_tool(SUBTYPES, n)
-        p["colors"] = per_tool(COLORS, n)
+        p["colors"] = per_tool(["#" + c.lstrip("#") for c in a.colors.split(",")] if a.colors else COLORS, n)
         self.lock = threading.Lock()
         self.prep = [("heat_bed", 24), ("heat_nozzle", 16)]
         if p.get("u1") or p.get("gates"):
@@ -701,6 +701,7 @@ def main():
     ap.add_argument("--nozzle", type=int, default=215)
     ap.add_argument("--filament-mm", type=float, default=7500)
     ap.add_argument("--filename", default="Projects/Multi Color Bracket.gcode")
+    ap.add_argument("--colors", help="filament colours per tool, e.g. 000000 or 1C1C1E,FF3B30 (repeats)")
     ap.add_argument("--no-auto", dest="auto", action="store_false", help="only start/resume via /_mock")
     ap.add_argument("--loop", action="store_true", help="start another print after each one ends")
     ap.add_argument("-v", "--verbose", action="store_true")

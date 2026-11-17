@@ -2616,13 +2616,32 @@ class KlipperDashboard
     var cols = []
     if kind == "milestone" cols.push(self.accent) end
     for c : self.band_colors
-      if c >= 0 && cols.find(c) == nil cols.push(c) end
+      if c >= 0
+        c = self.fire_color(c)
+        if cols.find(c) == nil cols.push(c) end
+      end
     end
-    if self.active_color >= 0 && cols.find(self.active_color) == nil cols.push(self.active_color) end
+    if self.active_color >= 0
+      var c = self.fire_color(self.active_color)
+      if cols.find(c) == nil cols.push(c) end
+    end
     for c : [0xFFD040, 0x44EE99, 0x66C8FF, 0xFF6BD5]
       if size(cols) < 3 && cols.find(c) == nil cols.push(c) end
     end
     return cols
+  end
+
+  # A burst fades as it spreads, so a filament colour that is fine for a
+  # swatch can vanish in the sky. Black and grey burst in silver; other dark
+  # colours keep their hue and are brightened.
+  def fire_color(c)
+    var r = (c >> 16) & 255
+    var g = (c >> 8) & 255
+    var b = c & 255
+    var top = max(r, max(g, b))
+    if top >= 170 return c end
+    if top - min(r, min(g, b)) <= 32 return 0xB4C0CC end
+    return rgb(r * 210 / top, g * 210 / top, b * 210 / top)
   end
 
   def celebrating()
@@ -2688,7 +2707,8 @@ class KlipperDashboard
           var sp = 3.0 + self.rnd[i] * 4.0
           var y = int((self.rnd[i + 24] * 16 + t * sp) % 19.0) - 2
           var x = int(self.rnd[(i + 40) % 64] * 52 + math.sin(t * 2.5 + i) * 1.5)
-          var c = i % 4 == 3 ? 0xFFFFFF : self.cele_cols[i % size(self.cele_cols)]
+          # Every fourth piece is white; the others take the colours in turn.
+          var c = i % 4 == 3 ? 0xFFFFFF : self.cele_cols[(i - i / 4) % size(self.cele_cols)]
           var on = math.sin(t * (5 + self.rnd[i] * 5) + i) > -0.3
           pixel(x, y, self.shade(c, int(100 * dens * (on ? 1.0 : 0.35))))
           i += 1
