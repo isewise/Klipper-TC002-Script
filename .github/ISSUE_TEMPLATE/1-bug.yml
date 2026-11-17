@@ -56,5 +56,6 @@ body:
   - type: textarea
     id: extra
     attributes:
-      label: Photos or anything else
-      description: A photo or screen recording of the clock helps a lot. Drag files in here.
+      label: Photos, recording or anything else
+      description: |
+        A photo or video of the clock helps a lot. If it happens during a print, a **[recording of that print](https://github.com/isewise/Klipper-TC002-Script/blob/main/docs/RECORDING.md)** lets us replay it exactly. Drag files in here.

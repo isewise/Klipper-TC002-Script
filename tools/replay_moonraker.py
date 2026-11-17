@@ -8,7 +8,8 @@ to test the dashboard against a real printer's behaviour, repeatedly.
   python3 tools/replay_moonraker.py print.jsonl --metadata meta.json --speed 4
 
 --metadata is the Moonraker /server/files/metadata answer for the printed
-file (optional; without it the dashboard just has no slicer data).
+file. Recordings from record_moonraker.py 2 carry it inside; for older ones
+pass it (without it the dashboard just has no slicer data).
 --start / --end trim the recording (seconds from its first status).
 Recordings may be gzip-compressed (.jsonl.gz), as in tests/recordings/.
 """
@@ -26,6 +27,7 @@ class Replay:
     def __init__(self, a):
         self.a = a
         self.times, self.states, self.console = [], [], []
+        embedded = None
         opener = gzip.open if a.recording.endswith(".gz") else open
         for line in opener(a.recording, "rt"):
             r = json.loads(line)
@@ -34,6 +36,8 @@ class Replay:
                 self.states.append(r["status"])
             elif r["kind"] == "console":
                 self.console.extend(r["entries"])
+            elif r["kind"] == "metadata" and embedded is None:
+                embedded = r.get("answer")
         if not self.times:
             raise SystemExit("no status records in " + a.recording)
         self.t_first = self.times[0] + a.start
@@ -41,7 +45,7 @@ class Replay:
         self.console = [e for e in self.console if self.t_first - 300 <= e["time"] <= self.t_last]
         self.console.sort(key=lambda e: e["time"])
         self.ctimes = [e["time"] for e in self.console]
-        self.meta = json.load(open(a.metadata)) if a.metadata else None
+        self.meta = json.load(open(a.metadata)) if a.metadata else embedded
         self.began = time.time()
         self.lock = threading.Lock()
 

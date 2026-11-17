@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Every printer and firmware reports a little differently, so the best help is a **recording** of one print from your printer. The script was built from recordings of a Snapmaker U1 and a Klipper Ender 3 – yours makes it work on your printer too.
+        Every printer and firmware reports a little differently, so the best help is a **[recording](https://github.com/isewise/Klipper-TC002-Script/blob/main/docs/RECORDING.md)** of one print from your printer. The script was built from recordings of a Snapmaker U1 and a Klipper Ender 3 – yours makes it work on your printer too.
   - type: input
     id: model
     attributes:
@@ -79,13 +79,7 @@ body:
     attributes:
       label: Recording (the most useful thing you can add)
       description: |
-        On any computer on your network with Python 3, from a copy of this repository:
-
-        ```
-        python3 tools/record_moonraker.py --printer <printer IP> --out my_printer.jsonl
-        ```
-
-        Start it, then start a print; it stops by itself a little after the print ends and only reads from the printer. Zip the `.jsonl` file and drag it in here. It contains the file name and your printer's local address – nothing else personal.
+        One download and one command, on the printer itself or any computer on your network – it only reads from the printer. **[How to make a recording](https://github.com/isewise/Klipper-TC002-Script/blob/main/docs/RECORDING.md)**. Then drag the `.jsonl.gz` file in here.
   - type: textarea
     id: log
     attributes:

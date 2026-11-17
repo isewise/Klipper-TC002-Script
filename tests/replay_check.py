@@ -100,9 +100,10 @@ def main():
         if not res.get("ok"):
             raise SystemExit("install failed: %s" % res)
     saved = {f["key"]: f["value"] for f in req("GET", AW + "/api/v1/apps/KlipperDashboard/config")["fields"]}
-    rp = subprocess.Popen([sys.executable, "-I", os.path.join(ROOT, "tools", "replay_moonraker.py"), rec,
-                           "--metadata", meta, "--port", str(PORT), "--speed", str(speed),
-                           "--start", str(lo), "--end", str(hi)], stdout=subprocess.PIPE, text=True)
+    extra = ["--metadata", meta] if os.path.exists(meta) else []  # newer recordings carry it
+    rp = subprocess.Popen([sys.executable, "-I", os.path.join(ROOT, "tools", "replay_moonraker.py"), rec]
+                          + extra + ["--port", str(PORT), "--speed", str(speed),
+                                     "--start", str(lo), "--end", str(hi)], stdout=subprocess.PIPE, text=True)
     print(rp.stdout.readline().strip(), flush=True)
     frames, eta = [], []
     out_path = os.path.join(a.out, "replay_%s.jsonl" % a.name)

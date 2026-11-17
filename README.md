@@ -149,13 +149,11 @@ AWTRIX web UI.
 
 ## Help improve support for your printer
 
-`tools/record_moonraker.py` records a print from your printer (read-only:
-it only sends GET requests). Recordings of printers we have not tested –
-especially AFC, Happy Hare and stock-firmware Snapmaker U1 – help a lot:
-
-```bash
-python3 tools/record_moonraker.py --printer 192.168.1.50 --out my_printer.jsonl
-```
+A **recording** of one print from your printer lets us replay it on a test
+clock until the dashboard gets it right. Recordings of printers we have not
+tested – especially AFC, Happy Hare and stock-firmware Snapmaker U1 – help a
+lot. **[How to make and send a recording](docs/RECORDING.md)** – one download,
+one command, and it only reads from your printer.
 
 `tools/mock_moonraker.py` simulates printers for testing (`--help` lists the
 profiles), and `tools/replay_moonraker.py` plays a recording back.

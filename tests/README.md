@@ -52,7 +52,9 @@ the clock showed against the real remaining time, and writes
 `tests/out/replay_<name>.jsonl` and `.png`.
 
 Recordings of other printers are welcome, especially AFC, Happy Hare and
-stock Snapmaker U1 firmware.
+stock Snapmaker U1 firmware: [how to make one](../docs/RECORDING.md).
+Recordings from `tools/record_moonraker.py` carry their file's metadata, so
+they need no separate `.metadata.json`.
 
 ## A real clock: `device_check.py`
 

@@ -56,4 +56,4 @@ body:
     attributes:
       label: Recording (very welcome)
       description: |
-        `python3 tools/record_moonraker.py --printer <printer IP> --out my_unit.jsonl` from a copy of this repository, during a print with a few tool changes. Zip the file and drag it in here.
+        A recording of a print with a few tool changes shows exactly what your unit reports. **[How to make a recording](https://github.com/isewise/Klipper-TC002-Script/blob/main/docs/RECORDING.md)** – then drag the `.jsonl.gz` file in here.
