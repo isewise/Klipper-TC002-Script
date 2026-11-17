@@ -79,7 +79,7 @@ body:
     attributes:
       label: Recording (the most useful thing you can add)
       description: |
-        One download and one command, on the printer itself or any computer on your network – it only reads from the printer. **[How to make a recording](https://github.com/isewise/Klipper-TC002-Script/blob/main/docs/RECORDING.md)**. Then drag the `.jsonl.gz` file in here.
+        One download and one command on any computer on your network, with Mainsail or Fluidd – it only reads from the printer. **[How to make a recording](https://github.com/isewise/Klipper-TC002-Script/blob/main/docs/RECORDING.md)**. Then drag the `.jsonl.gz` file in here.
   - type: textarea
     id: log
     attributes:

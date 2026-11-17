@@ -10,23 +10,56 @@ A recording is made by a small program, `record_moonraker.py`. It only
 **reads** from your printer – it changes nothing and sends nothing anywhere.
 You attach the file it makes to your GitHub issue yourself.
 
-**You need:** about five minutes, and one print. A short print is fine, as
-long as it includes what goes wrong – for preparation problems (heating,
-homing, bed mesh…) the start of any print is enough.
+**You need:** about five minutes, one print, and a computer (Windows, macOS
+or Linux) on the same network as the printer that stays awake during the
+print. A short print is fine, as long as it includes what goes wrong – for
+preparation problems (heating, homing, bed mesh…) the start of any print is
+enough.
 
-## Easiest: on the printer's own computer
+**Mainsail or Fluidd?** Either. The recorder talks to Moonraker, which runs
+behind both.
 
-Your printer's computer (the Raspberry Pi or the printer's built-in board)
-already has everything needed. You need SSH access to it – your printer's
-or Mainsail's / Fluidd's documentation says how to log in.
+## Record from your computer (recommended)
 
-1. **Log in** from a terminal (Windows: PowerShell; macOS: Terminal):
+1. **Python 3.** Windows: install it from
+   [python.org](https://www.python.org/downloads/) and tick **Add python.exe
+   to PATH**. macOS: type `python3` in Terminal – if it's missing, macOS offers
+   to install it. Linux: it's already there.
+
+2. **Download the recorder.** Open a terminal (Windows: **PowerShell**;
+   macOS: **Terminal**), go to a folder such as Downloads (`cd Downloads`)
+   and run:
 
    ```bash
-   ssh pi@192.168.1.50
+   curl -LO https://raw.githubusercontent.com/isewise/Klipper-TC002-Script/main/tools/record_moonraker.py
    ```
 
-   Use your printer's address and user name (`pi` on MainsailOS).
+   On Windows type `curl.exe` instead of `curl`. Or open the link in your
+   browser and save the page as `record_moonraker.py`.
+
+3. **Start it** with your printer's address – the one you open Mainsail or
+   Fluidd with:
+
+   ```bash
+   python3 record_moonraker.py --printer 192.168.1.50
+   ```
+
+   On Windows type `py` instead of `python3`. It answers "Connected to
+   Moonraker …" and "Waiting for a print to start".
+
+4. **Start a print.** Leave the terminal open and don't let the computer go
+   to sleep. The recorder stops by itself a little after the print ends and
+   saves `recording-<date>.jsonl.gz` in the same folder. Ctrl+C stops early
+   and still saves what it has.
+
+## Or: on the printer itself (advanced)
+
+If you're comfortable with SSH, the printer's own computer (the Raspberry Pi
+or the printer's built-in board) can record by itself: nothing to install,
+and your computer can sleep meanwhile.
+
+1. **Log in:** `ssh pi@192.168.1.50` – your printer's address and user name
+   (`pi` on MainsailOS; your printer's documentation says which).
 
 2. **Download the recorder:**
 
@@ -34,47 +67,23 @@ or Mainsail's / Fluidd's documentation says how to log in.
    curl -LO https://raw.githubusercontent.com/isewise/Klipper-TC002-Script/main/tools/record_moonraker.py
    ```
 
-   No `curl`? Use `wget https://raw.githubusercontent.com/isewise/Klipper-TC002-Script/main/tools/record_moonraker.py`.
+   No `curl`? Use `wget` with the same address.
 
-3. **Start it**, saving into your printer's config folder so you can
-   download the file from Mainsail or Fluidd afterwards:
+3. **Start it in the background**, saving into the printer's config folder:
 
    ```bash
    nohup python3 record_moonraker.py --out ~/printer_data/config/recording.jsonl.gz > recording.log 2>&1 &
    ```
 
-   `nohup … &` keeps it running after you close the terminal. To watch it:
-   `tail -f recording.log` (Ctrl+C stops watching, not recording).
+   It keeps running after you log out. To watch it: `tail -f recording.log`
+   (Ctrl+C stops watching, not recording).
 
-4. **Start a print.** The recorder notices it, records it, and stops by itself
-   a little after the print ends.
+4. **Start a print.** The recorder stops by itself after it.
 
 5. **Download the file:** in Mainsail, **Machine** → config files (Fluidd:
-   **Configuration**) → `recording.jsonl.gz` → download. Then delete it there.
-   If it isn't listed, copy it from a terminal on your computer instead:
-
-   ```bash
-   scp pi@192.168.1.50:printer_data/config/recording.jsonl.gz .
-   ```
-
-## Or: on your own computer
-
-Any computer on the same network with [Python 3](https://www.python.org/downloads/)
-works, as long as it stays awake for the whole print.
-
-1. Open https://raw.githubusercontent.com/isewise/Klipper-TC002-Script/main/tools/record_moonraker.py
-   and save it (Ctrl+S / Cmd+S) as `record_moonraker.py`.
-2. In a terminal, in the folder where you saved it:
-
-   ```bash
-   python3 record_moonraker.py --printer 192.168.1.50
-   ```
-
-   On Windows, use `py` instead of `python3`. If your printer only answers
-   through Mainsail or Fluidd, add `--port 80`.
-3. Start a print. The recorder stops by itself after it and saves
-   `recording-<date>.jsonl.gz` in the same folder. Ctrl+C stops early and
-   still saves what it has.
+   **Configuration**) → `recording.jsonl.gz` → download, then delete it there.
+   If it isn't listed, copy it from a terminal on your computer:
+   `scp pi@192.168.1.50:printer_data/config/recording.jsonl.gz .`
 
 ## Send it
 
@@ -106,12 +115,15 @@ it after unpacking.
 
 - **"No answer from Moonraker"** – check the address; on the printer itself,
   leave `--printer` out. Some printers only answer through Mainsail or
-  Fluidd: add `--port 80`.
+  Fluidd: add the port you open them with – `--port 80` for
+  `http://192.168.1.50`, `--port 4408` for `http://192.168.1.50:4408`.
 - **"Moonraker refused access"** – run it on the printer itself (it trusts
   its own computer), or add your computer to `trusted_clients` in
   `moonraker.conf`.
 - **`python3: command not found`** – on Windows use `py`; otherwise install
   Python 3 from python.org.
+- **Windows: `curl` complains about a parameter** – PowerShell has its own
+  `curl`; type `curl.exe`.
 
 **Bonus:** if your clock is on the same network, add `--awtrix <clock IP>` and
 the recording also captures what the clock showed – ideal for display problems.
