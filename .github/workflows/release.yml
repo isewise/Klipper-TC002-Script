@@ -1,0 +1,32 @@
+# Push a version tag (for example v1.0.1) to publish a GitHub Release with
+# KlipperDashboard.ax attached and that version's CHANGELOG.md section as
+# the notes. The tag must match the script's @version line.
+# Then paste KlipperDashboard.ax into the script's AWTRIX Hub page:
+# the Hub has no upload API. See docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the previous tag, to compare the settings
+
+      - name: Check the version and write the notes
+        run: python3 tools/release_notes.py "$GITHUB_REF_NAME" notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" KlipperDashboard.ax \
+            --title "Klipper Dashboard ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md

@@ -162,6 +162,12 @@ emulator, and `tools/gif.py` records any AWTRIX display as an animated GIF.
 [`tests/`](tests/README.md) runs the script on the AWTRIX NG emulator against
 both, including recorded prints from a Snapmaker U1 and a Klipper Ender 3.
 
+## Versions
+
+What changed in each version: [CHANGELOG.md](CHANGELOG.md). Every version
+is also a [GitHub release](https://github.com/isewise/Klipper-TC002-Script/releases)
+with the script attached. How a release is made: [docs/RELEASING.md](docs/RELEASING.md).
+
 ## License
 
 MIT – see [LICENSE](LICENSE). Use, change and share it freely; keep the
