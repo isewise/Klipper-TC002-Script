@@ -14,3 +14,6 @@ tests/out/
 
 # Other people's scripts kept for reference (not ours to publish)
 resources/
+
+# Pictures for the README and the AWTRIX Hub
+!docs/media/*.png
